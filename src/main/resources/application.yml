@@ -1,0 +1,177 @@
+spring:
+  application:
+    name: legal-assistant
+  
+  # 数据源配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/legal_assistant?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root123456
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+  
+  # Redis配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: 
+      database: 0
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+      timeout: 5000
+  
+  # 文件上传配置
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+# MyBatis Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.legal.assistant.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# MinIO配置
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket-name: legal-assistant
+  
+# Milvus配置
+milvus:
+  host: localhost
+  port: 19530
+  collection-name: legal_documents
+  dimension: 1536
+
+# AgentScope配置 (DeepSeek API)
+agentscope:
+  api-key: your_deepseek_api_key
+  base-url: https://api.deepseek.com
+  timeout: 120000  # API调用超时时间，单位：毫秒
+  
+  # 记忆管理配置
+  memory:
+    cleanup-interval: 3600000  # 清理间隔，单位：毫秒（默认1小时）
+    max-idle-minutes: 120      # 最大空闲分钟数
+    auto-context:
+      msg-threshold: 30        # 消息数量阈值
+      last-keep: 10            # 保留最后N条消息
+      token-ratio: 0.7         # Token使用比例阈值
+      max-tokens: 8000         # 最大Token数
+      enable-auto-summary: true # 启用自动摘要
+  
+  # ReAct引擎配置
+  react:
+    max-iterations: 10         # 最大迭代次数
+    tool-timeout: 30000        # 工具调用超时，单位：毫秒
+    enable-tool-parallel: false # 是否启用工具并行调用
+    
+  # 监控配置
+  monitor:
+    trace-enabled: true        # 启用追踪
+    audit-enabled: true        # 启用审计
+    performance-enabled: true  # 启用性能监控
+    max-trace-history: 1000    # 最大追踪历史数
+    max-audit-logs: 5000       # 最大审计日志数
+  
+# Agent配置
+agent:
+  # 最大历史消息数
+  max-history-messages: 10
+  # 知识库检索最大结果数
+  max-knowledge-results: 5
+  # 流式输出超时时间（秒）
+  stream-timeout: 300
+  # 是否启用深度思考
+  deep-thinking-enabled: true
+  # 各Agent最大迭代次数
+  legal-consultation:
+    max-iterations: 5
+    temperature: 0.7
+  case-analysis:
+    max-iterations: 8
+    temperature: 0.5
+  dispute-focus:
+    max-iterations: 6
+    temperature: 0.4
+  risk-assessment:
+    max-iterations: 7
+    temperature: 0.3
+
+# JWT配置
+jwt:
+  secret: legal-assistant-jwt-secret-key-2024-very-long-and-random-string-for-security
+  expiration: 604800000  # 7天,单位:毫秒
+  refresh-expiration: 2592000000  # 30天,单位:毫秒
+
+# 短信服务配置(示例:阿里云)
+sms:
+  access-key-id: your_access_key_id
+  access-key-secret: your_access_key_secret
+  sign-name: 法律咨询助手
+  template-code: SMS_123456789
+  code-expiration: 300  # 验证码有效期5分钟,单位:秒
+  send-limit-per-minute: 1  # 每分钟发送限制
+  send-limit-per-day: 10  # 每天发送限制
+
+# 业务配置
+business:
+  share:
+    default-expiration-days: 7
+    max-expiration-days: 30
+  conversation:
+    soft-delete-days: 30
+  ocr:
+    language: chi_sim+eng
+  user:
+    default-nickname-prefix: 用户
+    avatar-max-size: 5242880  # 5MB,单位:字节
+    bio-max-length: 500
+    nickname-min-length: 2
+    nickname-max-length: 20
+    deactivate-retention-days: 30  # 注销后保留天数
+
+# SpringDoc OpenAPI (Swagger) 配置
+springdoc:
+  override-with-generic-response: false
+  remove-broken-reference-definitions: false
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      packages-to-scan: com.legal.assistant.controller
+# knife4j的增强配置，不需要增强可以不配
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+# 日志配置
+logging:
+  level:
+    com.legal.assistant: debug
+    org.springframework.web: info
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
