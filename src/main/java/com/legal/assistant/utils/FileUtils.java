@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -66,6 +67,17 @@ public class FileUtils {
         String tempDir = System.getProperty("java.io.tmpdir");
         Path tempPath = Paths.get(tempDir, generateUniqueFileName(file.getOriginalFilename()));
         Files.write(tempPath, file.getBytes());
+        return tempPath;
+    }
+
+    /**
+     * 保存 InputStream 到临时目录
+     */
+    public static Path saveToTemp(InputStream inputStream, String extension) throws IOException {
+        String tempDir = System.getProperty("java.io.tmpdir");
+        String uniqueFileName = UUID.randomUUID().toString().replace("-", "");
+        Path tempPath = Paths.get(tempDir, uniqueFileName + "." + extension);
+        Files.copy(inputStream, tempPath);
         return tempPath;
     }
 }

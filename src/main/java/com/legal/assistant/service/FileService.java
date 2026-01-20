@@ -1,172 +1,204 @@
 package com.legal.assistant.service;
 
 import com.legal.assistant.dto.response.FileResponse;
-import com.legal.assistant.entity.File;
+import com.legal.assistant.entity.DocumentFile;
 import com.legal.assistant.enums.FileType;
-import com.legal.assistant.exception.BusinessException;
-import com.legal.assistant.exception.ErrorCode;
-import com.legal.assistant.mapper.FileMapper;
+import com.legal.assistant.mapper.DocumentFileMapper;
+import com.legal.assistant.utils.DocumentExtractor;
 import com.legal.assistant.utils.FileUtils;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
-import io.minio.errors.MinioException;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.convert.DataSizeUnit;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.unit.DataSize;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.UUID;
 
+/**
+ * @author hcl
+ * @date 2026-01-20 09:49:26
+ * @description
+ * 描述：文件服务
+ */
 @Slf4j
 @Service
+
 public class FileService {
-    
-    @Autowired
-    private FileMapper fileMapper;
-    
-    @Autowired
-    private MinioClient minioClient;
-    
+
+    @Value("${ai.dashscope.api-key}")
+    private String apiKey;
+
     @Value("${minio.bucket-name}")
     private String bucketName;
-    
-    @Value("${spring.servlet.multipart.max-file-size:100MB}")
-    private DataSize maxFileSize;
-    
+    @Autowired
+    private  MinioClient minioClient;
+    @Autowired
+    private  DocumentFileMapper documentFileMapper;
+
+
+
+
     /**
      * 上传文件
+     * @param userId
+     * @param file
+     * @param description
+     * @return
      */
-    @Transactional
-    public FileResponse uploadFile(Long userId, MultipartFile multipartFile, Long knowledgeBaseId, String description) {
-        // 验证文件
-        if (multipartFile == null || multipartFile.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "文件不能为空");
+    public FileResponse uploadFile(Long userId, MultipartFile file, String description) {
+
+        //1.检查文件的类型是是不是我支持的
+        if (!FileUtils.isSupportedFileType(file.getOriginalFilename())) {
+            throw new RuntimeException("不支持的文件类型");
         }
-        
-        String originalFileName = multipartFile.getOriginalFilename();
-        if (originalFileName == null || originalFileName.isEmpty()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "文件名不能为空");
+        if (!FileUtils.validateFileSize(file, 1024 * 1024 * 20)) {
+            throw new RuntimeException("文件大小超出限制");
         }
-        
-        // 验证文件类型
-        if (!FileUtils.isSupportedFileType(originalFileName)) {
-            throw new BusinessException(ErrorCode.FILE_TYPE_NOT_SUPPORTED.getCode(), 
-                ErrorCode.FILE_TYPE_NOT_SUPPORTED.getMessage());
-        }
-        
-        // 验证文件大小
-        long maxSizeBytes = maxFileSize.toBytes();
-        if (!FileUtils.validateFileSize(multipartFile, maxSizeBytes)) {
-            throw new BusinessException(ErrorCode.FILE_TOO_LARGE.getCode(), 
-                ErrorCode.FILE_TOO_LARGE.getMessage());
-        }
-        
-        FileType fileType = FileUtils.getFileType(originalFileName);
-        String uniqueFileName = FileUtils.generateUniqueFileName(originalFileName);
-        String minioPath = "files/" + userId + "/" + uniqueFileName;
-        
-        // 创建文件记录
-        File file = new File();
-        file.setUserId(userId);
-        file.setKnowledgeBaseId(knowledgeBaseId);
-        file.setFileName(originalFileName);
-        file.setFileType(fileType != null ? fileType.getExtension() : "");
-        file.setFileSize(multipartFile.getSize());
-        file.setMinioPath(minioPath);
-        file.setStatus("uploading");
-        file.setCreatedAt(LocalDateTime.now());
-        fileMapper.insert(file);
-        
-        try {
-            // 上传到MinIO
-            try (InputStream inputStream = multipartFile.getInputStream()) {
-                minioClient.putObject(
-                    PutObjectArgs.builder()
-                        .bucket(bucketName)
-                        .object(minioPath)
-                        .stream(inputStream, multipartFile.getSize(), -1)
-                        .contentType(multipartFile.getContentType())
-                        .build()
-                );
-            }
-            
-            // 更新文件状态
-            file.setStatus("completed");
-            fileMapper.updateById(file);
-            
-            log.info("文件上传成功: fileId={}, fileName={}, userId={}", file.getId(), originalFileName, userId);
-            
-            // 异步处理文件解析（这里简化处理，实际应该异步执行）
-            // TODO: 实现文件内容提取和向量化
-            
-            // 构建响应
-            FileResponse response = new FileResponse();
-            response.setFileId(file.getId());
-            response.setFileName(file.getFileName());
-            response.setFileType(file.getFileType());
-            response.setFileSize(file.getFileSize());
-            response.setStatus(file.getStatus());
-            response.setUploadTime(file.getCreatedAt());
-            response.setExtractedText("");  // TODO: 提取文本内容
-            
-            return response;
-            
-        } catch (Exception e) {
-            log.error("文件上传失败", e);
-            file.setStatus("failed");
-            fileMapper.updateById(file);
-            throw new BusinessException(ErrorCode.FILE_UPLOAD_FAILED.getCode(), 
-                "文件上传失败: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * 获取文件信息
-     */
-    public FileResponse getFileInfo(Long userId, Long fileId) {
-        File file = fileMapper.selectById(fileId);
-        if (file == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "文件不存在");
-        }
-        
-        if (!file.getUserId().equals(userId)) {
-            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权限访问该文件");
-        }
-        
+
+        //2.将文件存储到minio中
+        String originalFilename = file.getOriginalFilename();
+        FileType fileType = FileUtils.getFileType(originalFilename);
+        String minioPath = uploadToMinio(file, originalFilename);
+
+        //3.提取文件的内容，不同类型的需要不同的解析去解析内容，统一解析成markdown文件，也上传到minio中
+        String extractedText = extractContent(file, fileType);
+        String markdownPath = uploadMarkdownToMinio(originalFilename, extractedText);
+
+        //4.保存文件记录到数据库
+        DocumentFile documentFile = new DocumentFile();
+        documentFile.setUserId(1L);
+        documentFile.setFileName(originalFilename);
+        documentFile.setFileType(fileType.getExtension());
+        documentFile.setFileSize(file.getSize());
+        documentFile.setMinioPath(minioPath);
+        documentFile.setMarkdownPath(markdownPath);
+        documentFile.setStatus("completed");
+        documentFile.setCreatedAt(LocalDateTime.now());
+
+        documentFileMapper.insert(documentFile);
+
+        //5.构造返回结果
         FileResponse response = new FileResponse();
-        BeanUtils.copyProperties(file, response);
-        response.setFileId(file.getId());
-        response.setUploadTime(file.getCreatedAt());
-        response.setExtractedText("");  // TODO: 从MinIO读取提取的文本
-        
+        response.setFileId(documentFile.getId());
+        response.setFileName(documentFile.getFileName());
+        response.setFileType(documentFile.getFileType());
+        response.setFileSize(documentFile.getFileSize());
+        response.setStatus(documentFile.getStatus());
+        response.setUploadTime(documentFile.getCreatedAt());
+        response.setExtractedText(extractedText.length() > 500 ?
+                extractedText.substring(0, 500) : extractedText);
+
         return response;
     }
-    
+
     /**
-     * 删除文件
+     * 上传文件到MinIO
      */
-    @Transactional
-    public void deleteFile(Long userId, Long fileId) {
-        File file = fileMapper.selectById(fileId);
-        if (file == null) {
-            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "文件不存在");
+    private String uploadToMinio(MultipartFile file, String filename) {
+        try {
+            String extension = FileUtils.getFileExtension(filename);
+            String objectName = "original/" + System.currentTimeMillis() + "_" +
+                    java.util.UUID.randomUUID() + "." + extension;
+
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(file.getInputStream(), file.getSize(), -1)
+                            .contentType(file.getContentType())
+                            .build()
+            );
+
+            log.info("文件上传到MinIO成功: {}", objectName);
+            return objectName;
+        } catch (Exception e) {
+            log.error("上传文件到MinIO失败: {}", filename, e);
+            throw new RuntimeException("上传文件失败: " + e.getMessage());
         }
-        
-        if (!file.getUserId().equals(userId)) {
-            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权限删除该文件");
+    }
+
+    /**
+     * 上传Markdown内容到MinIO
+     */
+    private String uploadMarkdownToMinio(String originalFilename, String markdownContent) {
+        try {
+            String baseName = originalFilename.replaceAll("\\.[^.]+$", "");
+            String objectName = "markdown/" + System.currentTimeMillis() + "_" +
+                    java.util.UUID.randomUUID() + "_" + baseName + ".md";
+
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(new ByteArrayInputStream(markdownContent.getBytes(StandardCharsets.UTF_8)),
+                                    markdownContent.getBytes(StandardCharsets.UTF_8).length, -1)
+                            .contentType("text/markdown")
+                            .build()
+            );
+
+            log.info("Markdown文件上传到MinIO成功: {}", objectName);
+            return objectName;
+        } catch (Exception e) {
+            log.error("上传Markdown到MinIO失败: {}", originalFilename, e);
+            throw new RuntimeException("上传Markdown失败: " + e.getMessage());
         }
-        
-        // TODO: 从MinIO删除文件
-        // TODO: 从向量数据库删除向量
-        
-        fileMapper.deleteById(fileId);
-        log.info("删除文件: fileId={}, userId={}", fileId, userId);
+    }
+
+    /**
+     * 提取文件内容并转换为Markdown格式
+     * 使用 Apache Tika 统一处理所有文件格式（包括文档和图片OCR）
+     */
+    private String extractContent(MultipartFile file, FileType fileType) {
+        try {
+            Path tempFile = FileUtils.saveToTemp(file);
+
+            // 使用 Apache Tika 统一提取文本（支持文档和图片OCR）
+            String text = DocumentExtractor.extractText(tempFile, fileType);
+
+            // 删除临时文件
+            Files.deleteIfExists(tempFile);
+
+            // 转换为Markdown格式
+            return convertToMarkdown(text, fileType, file.getOriginalFilename());
+        } catch (Exception e) {
+            log.error("提取文件内容失败: {}", file.getOriginalFilename(), e);
+            return "";
+        }
+    }
+
+    /**
+     * 将提取的文本转换为Markdown格式
+     */
+    private String convertToMarkdown(String text, FileType fileType, String filename) {
+        if (text == null || text.isEmpty()) {
+            return "# " + filename + "\n\n无法提取文件内容。";
+        }
+
+        StringBuilder markdown = new StringBuilder();
+        markdown.append("# ").append(filename).append("\n\n");
+        markdown.append("**文件类型**: ").append(fileType.getDescription()).append("\n\n");
+        markdown.append("---\n\n");
+        markdown.append("## 文件内容\n\n");
+
+        // 如果文本包含换行符，保持原有格式
+        if (text.contains("\n")) {
+            markdown.append(text);
+        } else {
+            // 如果没有换行符，按段落分割
+            String[] paragraphs = text.split("(?<=。 )|(?<=\\n )|(?<=\n)");
+            for (String para : paragraphs) {
+                if (!para.trim().isEmpty()) {
+                    markdown.append(para.trim()).append("\n\n");
+                }
+            }
+        }
+
+        return markdown.toString();
     }
 }

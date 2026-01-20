@@ -22,26 +22,7 @@
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <knife4j.version>4.5.0</knife4j.version>
-        <commons-compress.version>1.26.2</commons-compress.version>
-        <pdfbox.version>2.0.30</pdfbox.version>
     </properties>
-
-    <dependencyManagement>
-        <dependencies>
-            <!-- 强制使用兼容版本的 commons-compress -->
-            <dependency>
-                <groupId>org.apache.commons</groupId>
-                <artifactId>commons-compress</artifactId>
-                <version>${commons-compress.version}</version>
-            </dependency>
-            <!-- 强制使用兼容版本的 PDFBox (Tika 2.9.2 需要 2.0.x) -->
-            <dependency>
-                <groupId>org.apache.pdfbox</groupId>
-                <artifactId>pdfbox</artifactId>
-                <version>${pdfbox.version}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
 
     <dependencies>
         <!-- Spring Boot Web -->
@@ -85,69 +66,23 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>8.5.7</version>
-            <!-- 排除可能冲突的旧版本 commons-compress -->
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.commons</groupId>
-                    <artifactId>commons-compress</artifactId>
-                </exclusion>
-            </exclusions>
         </dependency>
 
-
-
-        <!-- Apache Commons Compress - 必须使用兼容版本以支持 Tika -->
-        <!-- 显式声明以确保所有传递依赖使用此版本 -->
+        <!-- Milvus -->
         <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-compress</artifactId>
-            <version>${commons-compress.version}</version>
+            <groupId>io.milvus</groupId>
+            <artifactId>milvus-sdk-java</artifactId>
+            <version>2.3.4</version>
         </dependency>
 
-        <!-- Apache Tika - 统一文档内容提取框架 -->
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-core</artifactId>
-            <version>2.9.2</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-parsers-standard-package</artifactId>
-            <version>2.9.2</version>
-            <!-- 排除可能冲突的传递依赖，使用我们显式声明的版本 -->
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.commons</groupId>
-                    <artifactId>commons-compress</artifactId>
-                </exclusion>
-                <!-- 排除 Tika 内置的 PDFBox，使用我们显式声明的 2.0.30 版本 -->
-                <exclusion>
-                    <groupId>org.apache.pdfbox</groupId>
-                    <artifactId>pdfbox</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tika</groupId>
-            <artifactId>tika-parser-ocr-module</artifactId>
-            <version>2.9.2</version>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.commons</groupId>
-                    <artifactId>commons-compress</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
-        <!-- PDFBox - Tika 2.9.2 需要 PDFBox 2.0.x，不支持 3.x -->
-        <!-- 显式声明以确保使用兼容版本 -->
+        <!-- 文档处理 -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
-            <version>${pdfbox.version}</version>
+            <version>3.0.1</version>
         </dependency>
 
-        <!-- Apache POI for Office documents (Tika底层依赖，保留以确保兼容性) -->
+        <!-- Apache POI for Office documents -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi</artifactId>
@@ -174,7 +109,7 @@
             <version>0.64.8</version>
         </dependency>
 
-        <!-- OCR - Tesseract (Tika OCR模块需要，保留) -->
+        <!-- OCR -->
         <dependency>
             <groupId>net.sourceforge.tess4j</groupId>
             <artifactId>tess4j</artifactId>
@@ -220,16 +155,17 @@
         </dependency>
 
         <dependency>
+            <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-spring-boot-starter</artifactId>
             <version>1.0.7</version>
         </dependency>
 
-        <!-- OkHttp for HTTP requests (阿里百炼API调用) -->
+        <!-- 阿里云百炼平台DashScope SDK -->
         <dependency>
-            <groupId>com.squareup.okhttp3</groupId>
-            <artifactId>okhttp</artifactId>
-            <version>4.12.0</version>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-starter</artifactId>
+            <version>1.0.0-M2</version>
         </dependency>
 
         <!-- Spring Boot Test -->
@@ -242,7 +178,6 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
-
     </dependencies>
 
     <build>

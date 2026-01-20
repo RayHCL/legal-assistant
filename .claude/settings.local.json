@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp add:*)",
+      "mcp__agentscope-docs__list_doc_sources",
+      "mcp__agentscope-docs__fetch_docs",
+      "Bash(mvn:*)",
+      "Bash(find:*)",
+      "Bash(xargs:*)",
+      "Bash(git -C /Users/rayhu/Documents/beiming/代码/code/legal-assistant status --short)",
+      "Bash(git -C /Users/rayhu/Documents/beiming/代码/code/legal-assistant log --oneline --all -10)",
+      "WebSearch"
+    ]
+  }
+}

@@ -1,7 +1,6 @@
 spring:
   application:
     name: legal-assistant
-  
   # 数据源配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -39,7 +38,7 @@ mybatis-plus:
   type-aliases-package: com.legal.assistant.entity
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+#    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
       logic-delete-field: isDeleted
@@ -52,68 +51,6 @@ minio:
   access-key: minioadmin
   secret-key: minioadmin
   bucket-name: legal-assistant
-  
-# Milvus配置
-milvus:
-  host: localhost
-  port: 19530
-  collection-name: legal_documents
-  dimension: 1536
-
-# AgentScope配置 (DeepSeek API)
-agentscope:
-  api-key: your_deepseek_api_key
-  base-url: https://api.deepseek.com
-  timeout: 120000  # API调用超时时间，单位：毫秒
-  
-  # 记忆管理配置
-  memory:
-    cleanup-interval: 3600000  # 清理间隔，单位：毫秒（默认1小时）
-    max-idle-minutes: 120      # 最大空闲分钟数
-    auto-context:
-      msg-threshold: 30        # 消息数量阈值
-      last-keep: 10            # 保留最后N条消息
-      token-ratio: 0.7         # Token使用比例阈值
-      max-tokens: 8000         # 最大Token数
-      enable-auto-summary: true # 启用自动摘要
-  
-  # ReAct引擎配置
-  react:
-    max-iterations: 10         # 最大迭代次数
-    tool-timeout: 30000        # 工具调用超时，单位：毫秒
-    enable-tool-parallel: false # 是否启用工具并行调用
-    
-  # 监控配置
-  monitor:
-    trace-enabled: true        # 启用追踪
-    audit-enabled: true        # 启用审计
-    performance-enabled: true  # 启用性能监控
-    max-trace-history: 1000    # 最大追踪历史数
-    max-audit-logs: 5000       # 最大审计日志数
-  
-# Agent配置
-agent:
-  # 最大历史消息数
-  max-history-messages: 10
-  # 知识库检索最大结果数
-  max-knowledge-results: 5
-  # 流式输出超时时间（秒）
-  stream-timeout: 300
-  # 是否启用深度思考
-  deep-thinking-enabled: true
-  # 各Agent最大迭代次数
-  legal-consultation:
-    max-iterations: 5
-    temperature: 0.7
-  case-analysis:
-    max-iterations: 8
-    temperature: 0.5
-  dispute-focus:
-    max-iterations: 6
-    temperature: 0.4
-  risk-assessment:
-    max-iterations: 7
-    temperature: 0.3
 
 # JWT配置
 jwt:
@@ -167,6 +104,9 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
+ai:
+  dashscope:
+    api-key: sk-197a1ca0bca44229830a9a7ff2486347
 
 # 日志配置
 logging:
