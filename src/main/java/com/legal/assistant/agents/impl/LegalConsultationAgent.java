@@ -38,4 +38,6 @@ public class LegalConsultationAgent extends ReactLegalAgent {
     protected double getDefaultTemperature() {
         return 0.7;
     }
+
+
 }

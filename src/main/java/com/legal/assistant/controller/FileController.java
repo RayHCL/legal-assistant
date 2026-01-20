@@ -1,6 +1,5 @@
 package com.legal.assistant.controller;
 
-import com.legal.assistant.annotation.NoAuth;
 import com.legal.assistant.common.Result;
 import com.legal.assistant.dto.response.FileResponse;
 import com.legal.assistant.service.FileService;
@@ -33,7 +32,6 @@ public class FileController {
 
     @PostMapping("/upload")
     @Operation(summary = "上传文件", description = "上传文件到系统，支持多种格式（PDF、Word、Excel、PPT、WPS、图片等）。文件会存储到MinIO。需要Token认证。")
-    @NoAuth
     public Result<FileResponse> uploadFile(
             @Parameter(description = "上传的文件", required = true)
             @Schema(type = "string", format = "binary")
@@ -45,16 +43,5 @@ public class FileController {
         FileResponse response = fileService.uploadFile(userId, file, description);
         return Result.success(response);
     }
-
-//    @GetMapping("/{fileId}")
-//    @Operation(summary = "获取文件信息", description = "获取指定文件的详细信息，包括文件名、类型、大小、状态等。需要Token认证。")
-//    public Result<FileResponse> getFileInfo(
-//            @Parameter(description = "文件ID", required = true, example = "1")
-//            @PathVariable Long fileId,
-//            HttpServletRequest request) {
-//        Long userId = (Long) request.getAttribute("userId");
-//        FileResponse response = fileService.getFileInfo(userId, fileId);
-//        return Result.success(response);
-//    }
 
 }

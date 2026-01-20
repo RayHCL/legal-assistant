@@ -130,13 +130,13 @@ public class ChatService {
 //                }
 //            }
 //
-//            // 添加文件内容
-//            if (!fileContents.isEmpty()) {
-//                fullPrompt.append("\n\n【文件内容】\n");
-//                for (int i = 0; i < fileContents.size(); i++) {
-//                    fullPrompt.append("文件").append(i + 1).append("：\n").append(fileContents.get(i)).append("\n");
-//                }
-//            }
+            // 添加文件内容
+            if (!request.getFileIds().isEmpty()) {
+                fullPrompt.append("\n\n【文件内容】\n");
+                for (int i = 0; i < request.getFileIds().size(); i++) {
+                    fullPrompt.append("文件ID: ").append(request.getFileIds().get(i)).append("\n");
+                }
+            }
 
             // 5. 创建助手消息记录
             Message assistantMessage = new Message();

@@ -126,7 +126,6 @@ public class DocumentExtractor {
             // 记录检测到的文件类型
             String detectedType = metadata.get(Metadata.CONTENT_TYPE);
             log.info("文件类型检测: {}, 提取文本长度: {} 字符", detectedType, extractedText.length());
-            
             return extractedText;
             
         } catch (IOException | TikaException e) {

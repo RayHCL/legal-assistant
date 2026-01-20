@@ -72,7 +72,7 @@ public class FileService {
 
         //4.保存文件记录到数据库
         DocumentFile documentFile = new DocumentFile();
-        documentFile.setUserId(1L);
+        documentFile.setUserId(userId);
         documentFile.setFileName(originalFilename);
         documentFile.setFileType(fileType.getExtension());
         documentFile.setFileSize(file.getSize());
