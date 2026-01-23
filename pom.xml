@@ -26,6 +26,15 @@
         <pdfbox.version>2.0.30</pdfbox.version>
     </properties>
 
+    <!-- Aspose Maven 仓库 -->
+    <repositories>
+        <repository>
+            <id>AsposeJavaAPI</id>
+            <name>Aspose Java API</name>
+            <url>https://releases.aspose.com/java/repo/</url>
+        </repository>
+    </repositories>
+
     <dependencyManagement>
         <dependencies>
             <!-- 强制使用兼容版本的 commons-compress -->
@@ -174,6 +183,14 @@
             <version>0.64.8</version>
         </dependency>
 
+        <!-- poi-tl Word模板引擎 -->
+        <dependency>
+            <groupId>com.deepoove</groupId>
+            <artifactId>poi-tl</artifactId>
+            <version>1.12.2</version>
+        </dependency>
+
+
         <!-- OCR - Tesseract (Tika OCR模块需要，保留) -->
         <dependency>
             <groupId>net.sourceforge.tess4j</groupId>
@@ -242,6 +259,15 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- Aspose.Words for Java (Word转PDF) -->
+        <dependency>
+            <groupId>com.bmsoft.aspose</groupId>
+            <artifactId>aspose-words</artifactId>
+            <version>18.5</version>
+        </dependency>
+
+
+
 
     </dependencies>
 

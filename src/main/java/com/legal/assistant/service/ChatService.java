@@ -1,12 +1,15 @@
 package com.legal.assistant.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.agents.factory.LegalAgentFactory;
 import com.legal.assistant.dto.request.ChatCompletionRequest;
 import com.legal.assistant.dto.response.StreamChatResponse;
 import com.legal.assistant.entity.Conversation;
 import com.legal.assistant.entity.Message;
+import com.legal.assistant.enums.AgentType;
 import com.legal.assistant.enums.MessageRole;
+import com.legal.assistant.enums.ModelType;
 import com.legal.assistant.exception.BusinessException;
 import com.legal.assistant.exception.ErrorCode;
 import com.legal.assistant.mapper.ConversationMapper;
@@ -14,15 +17,20 @@ import com.legal.assistant.mapper.MessageMapper;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.EventType;
 import io.agentscope.core.agent.StreamOptions;
+import io.agentscope.core.memory.Memory;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.session.JsonSession;
+import io.agentscope.core.session.SessionManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
+import java.io.File;
 import java.time.LocalDateTime;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -38,6 +46,26 @@ public class ChatService {
     // 管理活跃的流，key 是 conversationId，value 是用于停止流的 Sinks
     private final ConcurrentHashMap<Long, Sinks.Empty<Void>> activeStreams = new ConcurrentHashMap<>();
 
+    // Agent 和 Memory 缓存，key 是 conversationId
+    private static class AgentSessionEntry {
+        final ReActAgent agent;
+        final Memory memory;
+        final SessionManager sessionManager;
+        final LocalDateTime createdAt;
+
+        AgentSessionEntry(ReActAgent agent, Memory memory, SessionManager sessionManager) {
+            this.agent = agent;
+            this.memory = memory;
+            this.sessionManager = sessionManager;
+            this.createdAt = LocalDateTime.now();
+        }
+    }
+
+    private final ConcurrentHashMap<Long, AgentSessionEntry> agentSessionCache = new ConcurrentHashMap<>();
+
+    @Value("${agent.session.base-path:./sessions}")
+    private String sessionBasePath;
+
     @Autowired
     private LegalAgentFactory agentFactory;
 
@@ -49,7 +77,6 @@ public class ChatService {
 
     @Autowired
     private MessageMapper messageMapper;
-
 
 
     /**
@@ -98,43 +125,16 @@ public class ChatService {
             userMessage.setCreatedAt(LocalDateTime.now());
             messageMapper.insert(userMessage);
 
-//            // 2. 检索知识库
-//            List<String> knowledgeContents = new ArrayList<>();
-//            if (request.getKnowledgeBaseIds() != null && !request.getKnowledgeBaseIds().isEmpty()) {
-//                knowledgeContents = knowledgeRetriever.retrieve(
-//                        request.getKnowledgeBaseIds(),
-//                        request.getQuestion(),
-//                        5
-//                );
-//            }
-//
-//            // 3. 获取文件内容
-//            List<String> fileContents = new ArrayList<>();
-//            if (request.getFileIds() != null && !request.getFileIds().isEmpty()) {
-//                for (Long fileId : request.getFileIds()) {
-//                    String content = knowledgeRetriever.getFileTextContent(fileId);
-//                    if (content != null && !content.isEmpty()) {
-//                        fileContents.add(content);
-//                    }
-//                }
-//            }
 
             // 4. 构建完整提示词
             StringBuilder fullPrompt = new StringBuilder(request.getQuestion());
 
-//            // 添加知识库内容
-//            if (!knowledgeContents.isEmpty()) {
-//                fullPrompt.append("\n\n【知识库内容】\n");
-//                for (int i = 0; i < knowledgeContents.size(); i++) {
-//                    fullPrompt.append("参考内容").append(i + 1).append("：\n").append(knowledgeContents.get(i)).append("\n");
-//                }
-//            }
-//
-            // 添加文件内容
+            // 添加可用文件列表提示
             if (!request.getFileIds().isEmpty()) {
-                fullPrompt.append("\n\n【文件内容】\n");
-                for (int i = 0; i < request.getFileIds().size(); i++) {
-                    fullPrompt.append("文件ID: ").append(request.getFileIds().get(i)).append("\n");
+                fullPrompt.append("\n\n【可用文件】\n");
+                fullPrompt.append("用户提供了以下文件，如需查看文件内容，请使用 getFileContent 工具获取：\n");
+                for (Long fileId : request.getFileIds()) {
+                    fullPrompt.append("  - 文件ID: ").append(fileId).append("\n");
                 }
             }
 
@@ -148,12 +148,18 @@ public class ChatService {
 
             Long finalAssistantMessageId = assistantMessage.getId();
 
-            // 6. 创建Agent
-            ReActAgent agent = agentFactory.createAgent(
+            // 6. 获取或创建 Agent 会话（带记忆）
+            AgentSessionEntry sessionEntry = getOrCreateAgentSession(
+                    userId,
+                    finalConversationId,
                     request.getAgentType(),
                     request.getModelType(),
                     request.getTemperature()
             );
+
+            final ReActAgent agent = sessionEntry.agent;
+            final Memory memory = sessionEntry.memory;
+            final SessionManager sessionManager = sessionEntry.sessionManager;
 
             // 7. 配置流式输出选项
             StreamOptions streamOptions = StreamOptions.builder()
@@ -180,14 +186,23 @@ public class ChatService {
                 // 获取停止信号
                 Sinks.Empty<Void> currentStopSignal = activeStreams.get(finalConversationId);
 
+                // 用于跟踪是否在ARTIFACT标签内
+                final boolean[] inArtifact = {false};
+
                 agent.stream(inputMsg, streamOptions)
                         .subscribeOn(Schedulers.boundedElastic())
+                        .doOnNext(event -> {
+
+                        })
                         .takeUntilOther(Flux.from(currentStopSignal.asMono()).doOnNext(v -> {
                             log.info("收到停止信号: conversationId={}", finalConversationId);
                         }))
                         .doOnComplete(() -> {
-                            // 清理停止信号
+                            // 清理上下文和停止信号
                             activeStreams.remove(finalConversationId);
+
+                            // 保存 Agent 会话记忆
+                            saveAgentSession(finalConversationId);
 
                             // 更新消息状态为完成
                             assistantMessage.setContent(contentBuilder.toString());
@@ -204,7 +219,7 @@ public class ChatService {
                                         finalGeneratedTitle,
                                         true
                                 );
-                                emitter.next("data: " + objectMapper.writeValueAsString(response) + "\n\n");
+                                emitter.next(objectMapper.writeValueAsString(response));
                                 emitter.complete();
                             } catch (Exception e) {
                                 log.error("发送完成事件失败", e);
@@ -212,8 +227,11 @@ public class ChatService {
                             }
                         })
                         .doOnError(error -> {
-                            // 清理停止信号
+                            // 清理上下文和停止信号
                             activeStreams.remove(finalConversationId);
+
+                            // 保存 Agent 会话记忆（即使出错也保存）
+                            saveAgentSession(finalConversationId);
 
                             log.error("Agent流式推理失败: conversationId={}", finalConversationId, error);
                             try {
@@ -229,7 +247,7 @@ public class ChatService {
                                         null,
                                         true
                                 );
-                                emitter.next("data: " + objectMapper.writeValueAsString(response) + "\n\n");
+                                emitter.next(objectMapper.writeValueAsString(response));
                                 emitter.complete();
                             } catch (Exception e) {
                                 log.error("发送错误事件失败", e);
@@ -237,7 +255,7 @@ public class ChatService {
                             }
                         })
                         .doOnCancel(() -> {
-                            // 清理停止信号
+
                             activeStreams.remove(finalConversationId);
                             log.info("流被取消: conversationId={}", finalConversationId);
                         })
@@ -251,16 +269,31 @@ public class ChatService {
                                         // 累积完整内容
                                         contentBuilder.append(chunkText);
 
+                                        // 检测ARTIFACT标签状态
+                                        String fullContent = contentBuilder.toString();
+
+                                        // 检测是否进入ARTIFACT标签
+                                        if (fullContent.contains("<ARTIFACT>") && !fullContent.contains("</ARTIFACT>")) {
+                                            inArtifact[0] = true;
+                                        }
+                                        // 检测是否退出ARTIFACT标签
+                                        else if (fullContent.contains("</ARTIFACT>")) {
+                                            inArtifact[0] = false;
+                                        }
+
+                                        // 根据状态决定status
+                                        String status = inArtifact[0] ? "artifact" : "streaming";
+
                                         // 发送流式内容事件
                                         StreamChatResponse response = new StreamChatResponse(
                                                 finalAssistantMessageId,
                                                 finalConversationId,
                                                 chunkText,
-                                                "streaming",
+                                                status,
                                                 null,
                                                 false
                                         );
-                                        emitter.next("data: " + objectMapper.writeValueAsString(response) + "\n\n");
+                                        emitter.next(objectMapper.writeValueAsString(response));
                                     }
                                 }
                             } catch (Exception e) {
@@ -272,6 +305,73 @@ public class ChatService {
         } catch (Exception e) {
             log.error("创建流式对话失败: userId={}, conversationId={}", userId, conversationId, e);
             return Flux.error(new BusinessException(ErrorCode.INTERNAL_ERROR.getCode(), "创建流式对话失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 获取或创建 Agent 会话（带记忆）
+     */
+    private AgentSessionEntry getOrCreateAgentSession(
+            Long userId,
+            Long conversationId,
+            AgentType agentType,
+            ModelType modelType,
+            Double temperature) {
+
+        // 尝试从缓存获取
+        AgentSessionEntry cachedEntry = agentSessionCache.get(conversationId);
+        if (cachedEntry != null) {
+            log.info("使用缓存的 Agent 会话，conversationId={}", conversationId);
+            return cachedEntry;
+        }
+
+        // 创建新的 Agent 和 SessionManager
+        log.info("创建新的 Agent 会话，conversationId={}", conversationId);
+        // 创建 Agent 上下文
+        AgentContext agentContext = new AgentContext(userId, conversationId, null);
+        // 创建 Agent
+        ReActAgent agent = agentFactory.createAgent(agentType, modelType, temperature, agentContext);
+
+        // 获取 Agent 的 Memory
+        Memory memory = agent.getMemory();
+
+        // 创建会话目录
+        File sessionDir = new File(sessionBasePath, String.valueOf(conversationId));
+        sessionDir.mkdirs();
+
+        // 创建 SessionManager
+        SessionManager sessionManager = SessionManager.forSessionId(String.valueOf(conversationId))
+                .withSession(new JsonSession(sessionDir.toPath()))
+                .addComponent(agent)
+                .addComponent(memory);
+
+        // 尝试加载已有会话
+        sessionManager.loadIfExists();
+
+        // 创建缓存条目
+        AgentSessionEntry entry = new AgentSessionEntry(agent, memory, sessionManager);
+
+        // 加入缓存
+        agentSessionCache.put(conversationId, entry);
+
+        log.info("Agent 会话创建成功，conversationId={}, 记忆消息数={}",
+                conversationId, memory.getMessages().size());
+
+        return entry;
+    }
+
+    /**
+     * 保存 Agent 会话记忆
+     */
+    private void saveAgentSession(Long conversationId) {
+        AgentSessionEntry entry = agentSessionCache.get(conversationId);
+        if (entry != null && entry.sessionManager != null) {
+            try {
+                entry.sessionManager.saveSession();
+                log.info("保存 Agent 会话成功，conversationId={}", conversationId);
+            } catch (Exception e) {
+                log.error("保存 Agent 会话失败，conversationId={}", conversationId, e);
+            }
         }
     }
 

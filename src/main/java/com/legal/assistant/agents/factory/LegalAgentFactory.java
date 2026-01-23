@@ -1,5 +1,6 @@
 package com.legal.assistant.agents.factory;
 
+import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.enums.AgentType;
 import com.legal.assistant.enums.ModelType;
 import com.legal.assistant.agents.base.ReactLegalAgent;
@@ -21,6 +22,9 @@ public class LegalAgentFactory {
     private RiskAssessmentAgent riskAssessmentAgent;
 
     @Autowired
+    private InteractiveRiskAssessmentAgent interactiveRiskAssessmentAgent;
+
+    @Autowired
     private DisputeFocusAgent disputeFocusAgent;
 
     @Autowired
@@ -29,9 +33,9 @@ public class LegalAgentFactory {
     /**
      * 创建Agent
      */
-    public ReActAgent createAgent(AgentType agentType, ModelType modelType, Double temperature) {
+    public ReActAgent createAgent(AgentType agentType, ModelType modelType, Double temperature, AgentContext agentContext) {
         ReactLegalAgent agent = getAgentImpl(agentType);
-        return agent.configure(modelType, temperature);
+        return agent.configure(modelType, temperature,agentContext);
     }
 
     /**
@@ -41,6 +45,7 @@ public class LegalAgentFactory {
         return switch (agentType) {
             case LEGAL_CONSULTATION -> legalConsultationAgent;
             case RISK_ASSESSMENT -> riskAssessmentAgent;
+            case INTERACTIVE_RISK_ASSESSMENT -> interactiveRiskAssessmentAgent;
             case DISPUTE_FOCUS -> disputeFocusAgent;
             case CASE_ANALYSIS -> caseAnalysisAgent;
         };

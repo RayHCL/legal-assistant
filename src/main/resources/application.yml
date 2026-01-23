@@ -108,6 +108,35 @@ ai:
   dashscope:
     api-key: sk-197a1ca0bca44229830a9a7ff2486347
 
+# Agent 配置
+agent:
+  # 记忆配置
+  memory:
+    # 记忆类型: AUTO_CONTEXT (智能上下文记忆) 或 IN_MEMORY (简单内存记忆)
+    type: AUTO_CONTEXT
+    # 消息阈值：当消息数量达到此值时，开始压缩历史消息
+    msg-threshold: 30
+    # 保留最后 N 条消息不被压缩
+    last-keep: 10
+    # Token 比例：保留 30% 的 token
+    token-ratio: 0.3
+  # 会话配置
+  session:
+    # 会话文件存储路径
+    base-path: ./sessions
+  # 法律咨询 Agent 配置
+  legal-consultation:
+    max-iterations: 5
+  # 风险评估 Agent 配置
+  risk-assessment:
+    max-iterations: 10
+
+# 服务器配置
+server:
+  # 服务器基础 URL（用于生成下载链接）
+  base-url: http://localhost:8080
+  port: 8080
+
 # 日志配置
 logging:
   level:

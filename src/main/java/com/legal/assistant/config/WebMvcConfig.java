@@ -17,7 +17,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor)
                 .addPathPatterns("/api/**")
-                .excludePathPatterns(
+                .excludePathPatterns("/api/report/download/**",
                     "/api/auth/send-code",
                     "/api/auth/login",
                     "/api/share/**",  // 分享接口无需认证
