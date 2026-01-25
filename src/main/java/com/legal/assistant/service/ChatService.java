@@ -78,6 +78,9 @@ public class ChatService {
     @Autowired
     private MessageMapper messageMapper;
 
+    @Autowired(required = false)
+    private RiskReportStreamingService riskReportStreamingService;
+
 
     /**
      * 创建流式对话
@@ -189,6 +192,10 @@ public class ChatService {
                 // 用于跟踪是否在ARTIFACT标签内
                 final boolean[] inArtifact = {false};
 
+                // 用于跟踪是否需要生成报告
+                final boolean[] needGenerateReport = {false};
+                final StringBuilder caseDescriptionBuilder = new StringBuilder();
+
                 agent.stream(inputMsg, streamOptions)
                         .subscribeOn(Schedulers.boundedElastic())
                         .doOnNext(event -> {
@@ -269,6 +276,51 @@ public class ChatService {
                                         // 累积完整内容
                                         contentBuilder.append(chunkText);
 
+                                        // 检测报告生成标记
+                                        if (chunkText.contains("[GENERATE_RISK_REPORT_START]")) {
+                                            needGenerateReport[0] = true;
+                                            log.info("检测到报告生成标记: conversationId={}", finalConversationId);
+                                        }
+
+                                        // 如果在报告生成模式中，累积案件描述
+                                        if (needGenerateReport[0]) {
+                                            caseDescriptionBuilder.append(chunkText);
+
+                                            // 检测到结束标记
+                                            if (chunkText.contains("[GENERATE_RISK_REPORT_END]")) {
+                                                String caseDescription = caseDescriptionBuilder.toString();
+                                                // 移除标记本身
+                                                caseDescription = caseDescription
+                                                        .replace("[GENERATE_RISK_REPORT_START]", "")
+                                                        .replace("[GENERATE_RISK_REPORT_END]", "")
+                                                        .trim();
+
+                                                log.info("提取到案件描述，长度={}: conversationId={}",
+                                                        caseDescription.length(), finalConversationId);
+
+                                                // 调用报告生成服务，流式输出
+                                                if (riskReportStreamingService != null) {
+                                                    riskReportStreamingService.generateReportStream(
+                                                            caseDescription,
+                                                            userId,
+                                                            finalConversationId,
+                                                            finalAssistantMessageId
+                                                    ).subscribe(
+                                                            reportChunk -> emitter.next(reportChunk),
+                                                            error -> log.error("报告生成失败", error),
+                                                            () -> log.info("报告生成完成")
+                                                    );
+                                                }
+
+                                                // 重置状态
+                                                needGenerateReport[0] = false;
+                                                caseDescriptionBuilder.setLength(0);
+                                            }
+
+                                            // 跳过常规输出
+                                            return;
+                                        }
+
                                         // 检测ARTIFACT标签状态
                                         String fullContent = contentBuilder.toString();
 
@@ -328,7 +380,7 @@ public class ChatService {
         // 创建新的 Agent 和 SessionManager
         log.info("创建新的 Agent 会话，conversationId={}", conversationId);
         // 创建 Agent 上下文
-        AgentContext agentContext = new AgentContext(userId, conversationId, null);
+        AgentContext agentContext = new AgentContext(userId, conversationId);
         // 创建 Agent
         ReActAgent agent = agentFactory.createAgent(agentType, modelType, temperature, agentContext);
 

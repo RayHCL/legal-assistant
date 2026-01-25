@@ -2,6 +2,7 @@ package com.legal.assistant.agents.context;
 
 import lombok.Data;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -11,7 +12,14 @@ import java.util.List;
  */
 @Data
 public class AgentContext {
-    private final Long userId;
-    private final Long conversationId;
-    private final List<Long> fileIds;
+    private  Long userId;
+    private  Long conversationId;
+    private  List<Long> fileIds;
+
+    public AgentContext(Long userId, Long conversationId) {
+        this.userId = userId;
+        this.conversationId = conversationId;
+        this.fileIds = new ArrayList<>();
+    }
+
 }

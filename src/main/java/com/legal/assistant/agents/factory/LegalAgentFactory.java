@@ -19,10 +19,10 @@ public class LegalAgentFactory {
     private LegalConsultationAgent legalConsultationAgent;
 
     @Autowired
-    private RiskAssessmentAgent riskAssessmentAgent;
+    private InteractiveCoordinatorAgent interactiveCoordinatorAgent;
 
     @Autowired
-    private InteractiveRiskAssessmentAgent interactiveRiskAssessmentAgent;
+    private ReportGenerationAgent reportGenerationAgent;
 
     @Autowired
     private DisputeFocusAgent disputeFocusAgent;
@@ -44,8 +44,8 @@ public class LegalAgentFactory {
     private ReactLegalAgent getAgentImpl(AgentType agentType) {
         return switch (agentType) {
             case LEGAL_CONSULTATION -> legalConsultationAgent;
-            case RISK_ASSESSMENT -> riskAssessmentAgent;
-            case INTERACTIVE_RISK_ASSESSMENT -> interactiveRiskAssessmentAgent;
+            case INTERACTIVE_COORDINATOR -> interactiveCoordinatorAgent;
+            case REPORT_GENERATION -> reportGenerationAgent;
             case DISPUTE_FOCUS -> disputeFocusAgent;
             case CASE_ANALYSIS -> caseAnalysisAgent;
         };

@@ -118,8 +118,14 @@ public class RiskReport {
     private String fullReportContent;
 
     /**
-     * 报告文件路径（PDF）
+     * MinIO存储路径（PDF文件）
      */
+    private String minioPath;
+
+    /**
+     * 报告文件路径（PDF）- 已废弃，使用minioPath
+     */
+    @Deprecated
     private String reportFilePath;
 
     /**

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.entity.RiskReport;
 import com.legal.assistant.mapper.RiskReportMapper;
+import com.legal.assistant.service.FileService;
+import com.legal.assistant.service.PdfService;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
@@ -25,11 +28,87 @@ public class RiskReportToolService {
     @Autowired
     private RiskReportMapper riskReportMapper;
 
+    @Autowired
+    private PdfService pdfService;
+
+    @Autowired
+    private FileService fileService;
+
     @Value("${server.base-url:http://localhost:8080}")
     private String serverBaseUrl;
 
 
-    @Tool(name = "generate_risk_report", description = "生成风险评估报告。使用时机：用户明确要求生成报告、信息收集完成且用户同意生成时。")
+    @Tool(name = "save_risk_report_to_db", description = "保存风险评估报告到数据库。ReportGenerationAgent专用：完成风险分析后调用此工具保存报告。")
+    public String saveRiskReportToDb(
+            @ToolParam(name = "ourSide", description = "我方当事人名称") String ourSide,
+            @ToolParam(name = "ourIdentity", description = "我方身份（原告/被告/申请人/被申请人/债权人/债务人等）") String ourIdentity,
+            @ToolParam(name = "otherParty", description = "对方当事人名称") String otherParty,
+            @ToolParam(name = "otherIdentity", description = "对方身份") String otherIdentity,
+            @ToolParam(name = "caseReason", description = "案由（合同纠纷/劳动争议/知识产权侵权等）") String caseReason,
+            @ToolParam(name = "coreDemand", description = "核心诉求，希望通过法律途径达成什么目标") String coreDemand,
+            @ToolParam(name = "basicFacts", description = "基本事实，案件的来龙去脉，包含时间、地点、具体事件") String basicFacts,
+            @ToolParam(name = "availableCoreEvidence", description = "现有核心证据，手中有哪些证据材料") String availableCoreEvidence,
+            @ToolParam(name = "overallRiskLevel", description = "综合风险等级（较低风险/中等风险/较高风险）") String overallRiskLevel,
+            @ToolParam(name = "overallRiskScore", description = "风险评分（10-100分，较低10-30，中等40-70，较高80-100）") Integer overallRiskScore,
+            @ToolParam(name = "overallRiskScoreReason", description = "风险评分原因，说明为什么给出这个评分") String overallRiskScoreReason,
+            @ToolParam(name = "advantagesOpportunityAnalysis", description = "优势与机会分析，列出有利因素") String advantagesOpportunityAnalysis,
+            @ToolParam(name = "riskChallengeAlert", description = "风险挑战提示，格式：主要风险：[描述] 风险点：[具体] 影响：[后果]") String riskChallengeAlert,
+            @ToolParam(name = "riskPoint", description = "风险点简述，提取核心风险点，每条20字以内，空格分隔") String riskPoint,
+            @ToolParam(name = "actionSuggestionsSubsequentStrategies", description = "行动建议与后续策略") String actionSuggestionsSubsequentStrategies,
+            @ToolParam(name = "reportDate", description = "报告日期，格式：YYYY年MM月DD日") String reportDate,
+            AgentContext ctx) {
+
+        try {
+            Long userId = ctx.getUserId();
+            Long conversationId = ctx.getConversationId();
+
+            // 生成报告编号
+            String reportId = generateReportId();
+
+            // 创建报告实体
+            RiskReport report = new RiskReport();
+            report.setReportId(reportId);
+            report.setUserId(userId);
+            report.setConversationId(conversationId);
+            report.setOurSide(ourSide);
+            report.setOurIdentity(ourIdentity);
+            report.setOtherParty(otherParty);
+            report.setOtherIdentity(otherIdentity);
+            report.setCaseReason(caseReason);
+            report.setCoreDemand(coreDemand);
+            report.setBasicFacts(basicFacts);
+            report.setAvailableCoreEvidence(availableCoreEvidence);
+            report.setOverallRiskLevel(overallRiskLevel);
+            report.setOverallRiskScore(overallRiskScore);
+            report.setOverallRiskScoreReason(overallRiskScoreReason);
+            report.setAdvantagesOpportunityAnalysis(advantagesOpportunityAnalysis);
+            report.setRiskChallengeAlert(riskChallengeAlert);
+            report.setRiskPoint(riskPoint);
+            report.setActionSuggestionsSubsequentStrategies(actionSuggestionsSubsequentStrategies);
+            report.setReportDate(reportDate);
+            report.setCreatedAt(LocalDateTime.now());
+            report.setUpdatedAt(LocalDateTime.now());
+
+            // 生成完整报告内容（Markdown格式）
+            String fullReport = buildFullReport(report);
+            report.setFullReportContent(fullReport);
+
+            // 保存到数据库（不生成PDF，PDF在用户下载时生成）
+            riskReportMapper.insert(report);
+
+            log.info("保存风险评估报告成功: reportId={}, userId={}, conversationId={}",
+                    reportId, userId, conversationId);
+
+            // 返回完整报告内容（将以artifact状态展示）
+            return buildFullReportResponse(report, reportId);
+
+        } catch (Exception e) {
+            log.error("保存风险评估报告失败", e);
+            return "错误：保存报告失败 - " + e.getMessage();
+        }
+    }
+
+    @Tool(name = "generate_risk_report", description = "生成风险评估报告（旧版，保留兼容）。使用时机：用户明确要求生成报告、信息收集完成且用户同意生成时。")
     public String generateRiskReport(
             @ToolParam(name = "ourSide", description = "我方当事人名称") String ourSide,
             @ToolParam(name = "ourIdentity", description = "我方身份（原告/被告/申请人/被申请人/债权人/债务人等）") String ourIdentity,
@@ -84,15 +163,24 @@ public class RiskReportToolService {
             String fullReport = buildFullReport(report);
             report.setFullReportContent(fullReport);
 
+            // 生成PDF并上传到MinIO
+            byte[] pdfBytes = pdfService.generateRiskReportPdf(report);
+            String filename = "风险评估报告_" + reportId + ".pdf";
+            String minioPath = fileService.uploadPdfToMinio(pdfBytes, filename);
+            report.setMinioPath(minioPath);
+
             // 保存到数据库
             riskReportMapper.insert(report);
 
-            log.info("生成风险评估报告成功: reportId={}, userId={}, conversationId={}",
-                    reportId, userId, conversationId);
+            log.info("生成风险评估报告成功: reportId={}, userId={}, conversationId={}, minioPath={}",
+                    reportId, userId, conversationId, minioPath);
 
-            // 返回结果
-            return buildSuccessResponse(report);
+            // 返回结果（包含完整报告展示）
+            return buildSuccessResponseWithFullReport(report);
 
+        } catch (IOException e) {
+            log.error("生成风险评估报告PDF失败", e);
+            return "错误：生成报告PDF失败 - " + e.getMessage();
         } catch (Exception e) {
             log.error("生成风险评估报告失败", e);
             return "错误：生成报告失败 - " + e.getMessage();
@@ -209,22 +297,33 @@ public class RiskReportToolService {
     }
 
     /**
-     * 构建成功响应
+     * 构建完整报告响应（用于ReportGenerationAgent）
      */
-    private String buildSuccessResponse(RiskReport report) {
+    private String buildFullReportResponse(RiskReport report, String reportId) {
         StringBuilder sb = new StringBuilder();
-        sb.append("✓ 报告已生成成功！\n\n");
+        sb.append("✅ 风险评估报告已生成\n\n");
+        sb.append("---\n\n");
+        sb.append("**【完整报告内容】**\n\n");
+        sb.append(report.getFullReportContent());
+        sb.append("\n---\n\n");
+        sb.append("**报告编号：**").append(reportId).append("\n\n");
+        sb.append("请问需要下载PDF报告吗？（回复\"下载\"即可获取临时下载链接）");
+        return sb.toString();
+    }
+
+    /**
+     * 构建成功响应（包含完整报告展示）- 旧版
+     */
+    @Deprecated
+    private String buildSuccessResponseWithFullReport(RiskReport report) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("✅ 报告已生成成功！\n\n");
+        sb.append("---\n\n");
+        sb.append("**【完整报告内容】**\n\n");
+        sb.append(report.getFullReportContent());
+        sb.append("\n---\n\n");
         sb.append("**报告编号：**").append(report.getReportId()).append("\n\n");
-        sb.append("**【报告预览】**\n\n");
-        sb.append("## 风险评估结果\n\n");
-        sb.append("- **综合风险等级：**").append(report.getOverallRiskLevel()).append("\n");
-        sb.append("- **风险评分：**").append(report.getOverallRiskScore()).append("分\n");
-        sb.append("- **核心风险点：**").append(report.getRiskPoint()).append("\n\n");
-        sb.append("您可以：\n");
-        sb.append("1. 查看完整报告内容\n");
-        sb.append("2. 下载报告文件\n");
-        sb.append("3. 继续补充信息重新生成\n\n");
-        sb.append("请问您需要下载报告吗？");
+        sb.append("请问您需要下载此报告吗？（回复\"下载\"即可获取PDF下载链接）");
         return sb.toString();
     }
 
@@ -233,12 +332,11 @@ public class RiskReportToolService {
      */
     private String buildDownloadLinkResponse(RiskReport report, String downloadLink) {
         StringBuilder sb = new StringBuilder();
-        sb.append("✓ 下载链接已生成！\n\n");
-        sb.append("**下载地址：**").append(downloadLink).append("\n\n");
-        sb.append("**温馨提示：**\n");
-        sb.append("- 链接有效期：7天\n");
-        sb.append("- 报告格式：PDF\n");
-        sb.append("- 请妥善保管报告，注意保密\n\n");
+        sb.append("✅ 下载链接已生成！\n\n");
+        sb.append("📥 **下载地址：**").append(downloadLink).append("\n\n");
+        sb.append("**⏰ 链接有效期：7天**\n");
+        sb.append("**📄 报告格式：PDF**\n");
+        sb.append("**🔐 请妥善保管报告，注意保密**\n\n");
         sb.append("还有其他需要帮助的吗？");
         return sb.toString();
     }

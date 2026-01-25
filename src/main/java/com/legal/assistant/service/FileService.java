@@ -201,4 +201,51 @@ public class FileService {
 
         return markdown.toString();
     }
+
+    /**
+     * 上传PDF到MinIO（用于风险评估报告）
+     * @param pdfBytes PDF字节数组
+     * @param filename 文件名
+     * @return MinIO对象路径
+     */
+    public String uploadPdfToMinio(byte[] pdfBytes, String filename) {
+        try {
+            String objectName = "risk-reports/" + System.currentTimeMillis() + "_" +
+                    java.util.UUID.randomUUID() + "_" + filename;
+
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(new ByteArrayInputStream(pdfBytes), pdfBytes.length, -1)
+                            .contentType("application/pdf")
+                            .build()
+            );
+
+            log.info("PDF报告上传到MinIO成功: {}", objectName);
+            return objectName;
+        } catch (Exception e) {
+            log.error("上传PDF到MinIO失败: {}", filename, e);
+            throw new RuntimeException("上传PDF失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 从MinIO下载文件
+     * @param minioPath MinIO对象路径
+     * @return 文件字节数组
+     */
+    public byte[] downloadFromMinio(String minioPath) {
+        try {
+            return minioClient.getObject(
+                    io.minio.GetObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(minioPath)
+                            .build()
+            ).readAllBytes();
+        } catch (Exception e) {
+            log.error("从MinIO下载文件失败: minioPath={}", minioPath, e);
+            throw new RuntimeException("下载文件失败: " + e.getMessage());
+        }
+    }
 }

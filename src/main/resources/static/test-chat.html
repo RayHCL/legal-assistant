@@ -210,11 +210,26 @@
             border-bottom-left-radius: 4px;
         }
 
+        /* 📄 报告内容样式 */
         .message-content.artifact {
-            background: #fff7e6;
-            border: 1px solid #ffd591;
-            white-space: pre-wrap;
-            font-family: monospace;
+            background: #ffffff;
+            border: 2px solid #1890ff;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
+            white-space: normal;
+        }
+
+        .message-content.artifact::before {
+            content: '📄 风险评估报告';
+            display: block;
+            font-size: 16px;
+            font-weight: 600;
+            color: #1890ff;
+            margin-bottom: 15px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e8e8e8;
         }
 
         /* Markdown 样式 */
@@ -401,8 +416,7 @@
                 <span class="config-label">Agent:</span>
                 <select id="agentType" class="config-select">
                     <option value="LEGAL_CONSULTATION">普通法律咨询</option>
-                    <option value="RISK_ASSESSMENT">风险评估</option>
-                    <option value="INTERACTIVE_RISK_ASSESSMENT" selected>交互式风险评估</option>
+                    <option value="INTERACTIVE_COORDINATOR" selected>交互式风险评估（推荐）⭐</option>
                     <option value="DISPUTE_FOCUS">争议焦点</option>
                     <option value="CASE_ANALYSIS">案件分析</option>
                 </select>
@@ -420,11 +434,23 @@
         <div class="chat-container">
             <div class="messages" id="messages">
                 <div class="message assistant">
-                    <div class="message-content">你好！我是法律助手，有什么可以帮助你的吗？</div>
+                    <div class="message-content">
+                        <h3>👋 欢迎使用法律助手系统</h3>
+                        <p><strong>可用功能：</strong></p>
+                        <ul>
+                            <li>💬 <strong>普通法律咨询</strong> - 回答法律问题</li>
+                            <li>📊 <strong>交互式风险评估</strong> ⭐ - 收集案件信息，生成专业报告（推荐）</li>
+                            <li>🎯 <strong>争议焦点分析</strong> - 分析案件争议点</li>
+                            <li>📋 <strong>案件分析</strong> - 深度案件分析</li>
+                        </ul>
+                        <p><strong>提示：</strong>选择"交互式风险评估"可以生成包含风险等级、评分、行动建议等完整内容的专业报告。</p>
+                        <hr>
+                        <p>有什么可以帮助你的吗？</p>
+                    </div>
                 </div>
             </div>
             <div class="input-area">
-                <textarea id="input" class="input-box" placeholder="输入消息..." rows="1"></textarea>
+                <textarea id="input" class="input-box" placeholder="例如：我是张三，原告，起诉XX公司买卖合同纠纷，要求支付货款100万元..." rows="1"></textarea>
                 <button id="sendBtn" class="send-btn" onclick="sendMessage()">发送</button>
             </div>
         </div>
@@ -632,11 +658,23 @@
                                 } else if (json.status === 'streaming' || json.status === 'artifact') {
                                     // 流式内容
                                     if (json.content) {
-                                        console.log('追加内容:', json.content);
+                                        console.log('追加内容:', json.content, 'status:', json.status);
                                         currentMessageText += json.content;
                                         receivedChunks++;
-                                        // 流式过程中显示纯文本
-                                        currentMessageElement.textContent = currentMessageText;
+
+                                        // 📄 如果是 artifact 状态（报告内容），实时渲染 Markdown
+                                        if (json.status === 'artifact') {
+                                            currentMessageElement.classList.add('artifact');
+                                            currentMessageElement.innerHTML = marked.parse(currentMessageText);
+                                            // 高亮代码块
+                                            currentMessageElement.querySelectorAll('pre code').forEach((block) => {
+                                                hljs.highlightElement(block);
+                                            });
+                                        } else {
+                                            // 普通流式内容显示纯文本
+                                            currentMessageElement.textContent = currentMessageText;
+                                        }
+
                                         // 滚动到底部
                                         const messagesContainer = document.getElementById('messages');
                                         messagesContainer.scrollTop = messagesContainer.scrollHeight;
