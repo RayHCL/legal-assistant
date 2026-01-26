@@ -243,55 +243,90 @@ public class RiskReportToolService {
      */
     private String buildFullReport(RiskReport report) {
         StringBuilder sb = new StringBuilder();
+
+        // 报告标题
         sb.append("# 关于\"").append(report.getOurSide()).append("与").append(report.getOtherParty())
-                .append(report.getCaseReason()).append("\"案的风险评估报告\n\n");
+                .append(report.getCaseReason()).append("\"案的法律风险评估报告\n\n");
 
-        sb.append("**致：**").append(report.getOurSide()).append("\n");
-        sb.append("**日期：**").append(report.getReportDate()).append("\n");
-        sb.append("**案由：**").append(report.getCaseReason()).append("\n\n");
-
-        sb.append("---\n\n");
-
-        sb.append("## 一、报告基础与声明\n\n");
-        sb.append("本报告基于").append(report.getReportDate()).append("提供的案件所述信息作出。");
-        sb.append("本报告旨在对案件进行初步的、方向性的风险评估，并非对诉讼结果的承诺。");
-        sb.append("随着案件证据的补充和程序的推进，评估结论可能发生变化。");
-        sb.append("本报告为内部法律分析文件，请注意保密。\n\n");
+        // 报告基本信息
+        sb.append("**致：** ").append(report.getOurSide()).append("\n");
+        sb.append("**日期：** ").append(report.getReportDate()).append("\n");
+        sb.append("**案由：** ").append(report.getCaseReason()).append("\n\n");
 
         sb.append("---\n\n");
 
-        sb.append("## 二、案件核心事实梳理\n\n");
-        sb.append("**").append(report.getOurIdentity()).append("：**").append(report.getOurSide()).append("\n\n");
-        sb.append("**").append(report.getOtherIdentity()).append("：**").append(report.getOtherParty()).append("\n\n");
-        sb.append("**核心诉求：**").append(report.getCoreDemand()).append("\n\n");
+        // 第一部分：声明
+        sb.append("## 第一部分 报告声明\n\n");
+        sb.append("### 一、报告性质\n\n");
+        sb.append("本报告系根据委托方于").append(report.getReportDate()).append("提供的相关案件信息出具。");
+        sb.append("本报告旨在对涉案法律事务进行初步的风险评估与分析，并非对案件结果的承诺或保证。\n\n");
+        sb.append("### 二、信息限制\n\n");
+        sb.append("本报告的分析意见仅基于委托方提供的信息作出。若案件事实、证据材料或相关法律环境发生变化，");
+        sb.append("本报告的评估结论亦可能相应调整。委托方应充分理解信息完整性对评估结论的重要影响。\n\n");
+        sb.append("### 三、使用说明\n\n");
+        sb.append("本报告仅供参考，不构成正式的法律意见。具体诉讼策略及法律行动，建议结合专业律师意见确定。\n\n");
+        sb.append("### 四、保密提示\n\n");
+        sb.append("本报告包含委托方的案件信息及分析意见，请注意保密，避免向无关第三方披露。\n\n");
 
-        sb.append("### 基本事实\n\n");
+        sb.append("---\n\n");
+
+        // 第二部分：案件基础信息
+        sb.append("## 第二部分 案件基础信息\n\n");
+
+        sb.append("### 一、当事人信息\n\n");
+        sb.append("**委托方**\n\n");
+        sb.append("- 名称/姓名：").append(report.getOurSide()).append("\n");
+        sb.append("- 法律地位：").append(report.getOurIdentity()).append("\n\n");
+
+        sb.append("**相对方**\n\n");
+        sb.append("- 名称/姓名：").append(report.getOtherParty()).append("\n");
+        sb.append("- 法律地位：").append(report.getOtherIdentity()).append("\n\n");
+
+        sb.append("### 二、纠纷概况\n\n");
+        sb.append("- **案由**：").append(report.getCaseReason()).append("\n\n");
+        sb.append("- **核心诉求**：").append(report.getCoreDemand()).append("\n\n");
+
+        sb.append("### 三、基本事实\n\n");
         sb.append(report.getBasicFacts()).append("\n\n");
 
-        sb.append("### 现有核心证据\n\n");
+        sb.append("### 四、现有证据清单\n\n");
         sb.append(report.getAvailableCoreEvidence()).append("\n\n");
 
         sb.append("---\n\n");
 
-        sb.append("## 三、初步风险评估\n\n");
-        sb.append("**综合风险：**").append(report.getOverallRiskScore()).append("分（").append(report.getOverallRiskLevel()).append("）\n\n");
-        sb.append("**评分说明：**\n\n").append(report.getOverallRiskScoreReason()).append("\n\n");
+        // 第三部分：法律风险分析
+        sb.append("## 第三部分 法律风险分析\n\n");
 
-        sb.append("### （一）优势与机会分析\n\n");
+        sb.append("### 一、综合风险评级\n\n");
+        sb.append("**风险等级**：").append(report.getOverallRiskLevel()).append("\n\n");
+        sb.append("**风险评分**：").append(report.getOverallRiskScore()).append("分\n\n");
+        sb.append("**评级依据**：\n\n").append(report.getOverallRiskScoreReason()).append("\n\n");
+
+        sb.append("### 二、有利因素分析\n\n");
         sb.append(report.getAdvantagesOpportunityAnalysis()).append("\n\n");
 
-        sb.append("### （二）风险与挑战提示\n\n");
+        sb.append("### 三、风险因素提示\n\n");
         sb.append(report.getRiskChallengeAlert()).append("\n\n");
 
-        sb.append("**核心风险点：**").append(report.getRiskPoint()).append("\n\n");
+        sb.append("**核心风险点摘要**：").append(report.getRiskPoint()).append("\n\n");
 
         sb.append("---\n\n");
 
-        sb.append("## 四、行动建议与后续策略\n\n");
+        // 第四部分：专业建议
+        sb.append("## 第四部分 专业建议\n\n");
         sb.append(report.getActionSuggestionsSubsequentStrategies()).append("\n\n");
 
         sb.append("---\n\n");
-        sb.append("*本报告由法律助手自动生成，仅供参考。建议咨询专业律师获取更详细的法律意见。*\n");
+
+        // 第五部分：结论
+        sb.append("## 第五部分 结论\n\n");
+        sb.append("综上所述，本案件").append(report.getOverallRiskLevel().equals("较低风险") ? "整体风险可控" :
+                report.getOverallRiskLevel().equals("中等风险") ? "存在一定风险，需要充分准备" : "风险较高，需要谨慎评估");
+        sb.append("，建议委托方根据本报告的分析意见，结合实际情况，制定相应的法律策略。\n\n");
+
+        sb.append("---\n\n");
+        sb.append("**免责声明**：本报告由法律风险评估系统自动生成，仅供参考，不构成正式法律意见。\n");
+        sb.append("**版权声明**：本报告内容仅供委托方内部使用，未经许可不得复制、传播或用于其他用途。\n");
 
         return sb.toString();
     }
@@ -301,13 +336,15 @@ public class RiskReportToolService {
      */
     private String buildFullReportResponse(RiskReport report, String reportId) {
         StringBuilder sb = new StringBuilder();
-        sb.append("✅ 风险评估报告已生成\n\n");
-        sb.append("---\n\n");
-        sb.append("**【完整报告内容】**\n\n");
+
+        sb.append("<ARTIFACT>\n");
         sb.append(report.getFullReportContent());
-        sb.append("\n---\n\n");
-        sb.append("**报告编号：**").append(reportId).append("\n\n");
-        sb.append("请问需要下载PDF报告吗？（回复\"下载\"即可获取临时下载链接）");
+        sb.append("\n</ARTIFACT>\n\n");
+
+        sb.append("**报告编号**：").append(reportId).append("\n\n");
+        sb.append("风险评估报告已生成完成。如需下载PDF格式报告，请回复\"下载\"。\n");
+        sb.append("如需补充信息重新评估，请提供补充材料。");
+
         return sb.toString();
     }
 

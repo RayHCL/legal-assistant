@@ -231,6 +231,36 @@ public class FileService {
     }
 
     /**
+     * 上传Markdown内容到MinIO（用于风险评估报告）
+     * @param markdownContent Markdown内容
+     * @param filename 文件名
+     * @return MinIO对象路径
+     */
+    public String riskUploadMarkdownToMinio(String markdownContent, String filename) {
+        try {
+            String baseName = filename.replaceAll("\\.[^.]+$", "");
+            String objectName = "risk-reports/" + System.currentTimeMillis() + "_" +
+                    java.util.UUID.randomUUID() + "_" + baseName + ".md";
+
+            minioClient.putObject(
+                    PutObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .stream(new ByteArrayInputStream(markdownContent.getBytes(StandardCharsets.UTF_8)),
+                                    markdownContent.getBytes(StandardCharsets.UTF_8).length, -1)
+                            .contentType("text/markdown")
+                            .build()
+            );
+
+            log.info("Markdown报告上传到MinIO成功: {}", objectName);
+            return objectName;
+        } catch (Exception e) {
+            log.error("上传Markdown到MinIO失败: {}", filename, e);
+            throw new RuntimeException("上传Markdown失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 从MinIO下载文件
      * @param minioPath MinIO对象路径
      * @return 文件字节数组

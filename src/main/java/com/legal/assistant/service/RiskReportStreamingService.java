@@ -125,22 +125,8 @@ public class RiskReportStreamingService {
                                 log.info("流式生成报告完成: userId={}, conversationId={}, 报告长度={}",
                                         userId, conversationId, contentBuilder.length());
 
-                                try {
-                                    // 发送完成事件
-                                    StreamChatResponse response = new StreamChatResponse(
-                                            messageId,
-                                            conversationId,
-                                            "",
-                                            "completed",
-                                            null,
-                                            true
-                                    );
-                                    emitter.next(objectMapper.writeValueAsString(response));
-                                    emitter.complete();
-                                } catch (Exception e) {
-                                    log.error("发送完成事件失败", e);
-                                    emitter.error(e);
-                                }
+                                // 不发送completed，让ChatService统一处理
+                                emitter.complete();
                             }
                     );
         });

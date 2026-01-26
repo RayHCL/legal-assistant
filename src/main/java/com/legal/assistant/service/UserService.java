@@ -36,8 +36,8 @@ public class UserService {
         
         UserInfoResponse response = new UserInfoResponse();
         response.setId(user.getId());
-        response.setNickname(user.getNickname());
-        response.setPhone(maskPhone(user.getPhone()));  // 脱敏
+        response.setNickName(user.getNickname());
+        response.setPhoneNumber(maskPhone(user.getPhone()));  // 脱敏
         response.setAvatar(user.getAvatar());
         response.setBio(user.getBio());
         response.setCreatedAt(user.getCreatedAt());

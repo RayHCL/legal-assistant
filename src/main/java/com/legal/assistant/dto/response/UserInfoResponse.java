@@ -11,10 +11,10 @@ public class UserInfoResponse {
     private Long id;
     
     @Schema(description = "昵称", example = "用户8000")
-    private String nickname;
+    private String nickName;
     
     @Schema(description = "手机号（脱敏显示）", example = "138****8000")
-    private String phone;
+    private String phoneNumber;
     
     @Schema(description = "头像URL", example = "http://example.com/avatar.jpg")
     private String avatar;

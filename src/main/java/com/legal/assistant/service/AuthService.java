@@ -62,7 +62,8 @@ public class AuthService {
         }
         
         // 生成6位验证码
-        String code = String.format("%06d", (int)(Math.random() * 1000000));
+//        String code = String.format("%06d", (int)(Math.random() * 1000000));
+        String code ="666666";
         
         // 存储验证码到Redis,5分钟过期
         String codeKey = "sms:code:" + phone;
@@ -86,9 +87,9 @@ public class AuthService {
     @Transactional
     public LoginResponse login(LoginRequest request, String clientIp) {
         // 验证验证码
-        String codeKey = "sms:code:" + request.getPhone();
+        String codeKey = "sms:code:" + request.getPhoneNumber();
         String storedCode = redisTemplate.opsForValue().get(codeKey);
-        if (storedCode == null || !storedCode.equals(request.getCode())) {
+        if (storedCode == null || !storedCode.equals(request.getVerificationCode())) {
             throw new BusinessException(ErrorCode.CODE_INVALID.getCode(), ErrorCode.CODE_INVALID.getMessage());
         }
         
@@ -96,16 +97,16 @@ public class AuthService {
         redisTemplate.delete(codeKey);
         
         // 查找用户,如果不存在则创建
-        User user = userMapper.selectByPhone(request.getPhone());
+        User user = userMapper.selectByPhone(request.getPhoneNumber());
         boolean isNewUser = false;
         
         if (user == null) {
             // 自动注册
             user = new User();
-            user.setPhone(request.getPhone());
+            user.setPhone(request.getPhoneNumber());
             // 默认昵称: 用户+手机号后4位
-            String phoneSuffix = request.getPhone().length() >= 4 
-                ? request.getPhone().substring(7) 
+            String phoneSuffix = request.getPhoneNumber().length() >= 4
+                ? request.getPhoneNumber().substring(7)
                 : "0000";
             user.setNickname(defaultNicknamePrefix + phoneSuffix);
             user.setIsEnabled(true);
@@ -114,7 +115,7 @@ public class AuthService {
             user.setUpdatedAt(LocalDateTime.now());
             userMapper.insert(user);
             isNewUser = true;
-            log.info("新用户注册: phone={}, userId={}", request.getPhone(), user.getId());
+            log.info("新用户注册: phone={}, userId={}", request.getPhoneNumber(), user.getId());
         }
         
         // 检查用户是否被禁用

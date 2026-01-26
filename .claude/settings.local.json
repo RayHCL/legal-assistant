@@ -9,7 +9,8 @@
       "Bash(xargs:*)",
       "Bash(git -C /Users/rayhu/Documents/beiming/代码/code/legal-assistant status --short)",
       "Bash(git -C /Users/rayhu/Documents/beiming/代码/code/legal-assistant log --oneline --all -10)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git checkout:*)"
     ]
   }
 }

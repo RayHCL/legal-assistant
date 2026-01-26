@@ -184,30 +184,24 @@ public class ChatService {
             Sinks.Empty<Void> stopSignal = Sinks.empty();
             activeStreams.put(finalConversationId, stopSignal);
 
+            // 用于跟踪报告生成状态
+            // 状态：0=信息收集阶段, 1=启动提示阶段, 2=报告生成阶段, 3=完成提示阶段
+            final int[] reportState = {0};
+            final StringBuilder accumulatedText = new StringBuilder();
+
             // 11. 执行流式推理
             return Flux.create(emitter -> {
                 // 获取停止信号
                 Sinks.Empty<Void> currentStopSignal = activeStreams.get(finalConversationId);
 
-                // 用于跟踪是否在ARTIFACT标签内
-                final boolean[] inArtifact = {false};
-
-                // 用于跟踪是否需要生成报告
-                final boolean[] needGenerateReport = {false};
-                final StringBuilder caseDescriptionBuilder = new StringBuilder();
-
                 agent.stream(inputMsg, streamOptions)
                         .subscribeOn(Schedulers.boundedElastic())
-                        .doOnNext(event -> {
-
-                        })
                         .takeUntilOther(Flux.from(currentStopSignal.asMono()).doOnNext(v -> {
                             log.info("收到停止信号: conversationId={}", finalConversationId);
                         }))
                         .doOnComplete(() -> {
                             // 清理上下文和停止信号
                             activeStreams.remove(finalConversationId);
-
                             // 保存 Agent 会话记忆
                             saveAgentSession(finalConversationId);
 
@@ -275,68 +269,41 @@ public class ChatService {
                                     if (chunkText != null && !chunkText.isEmpty()) {
                                         // 累积完整内容
                                         contentBuilder.append(chunkText);
-
-                                        // 检测报告生成标记
-                                        if (chunkText.contains("[GENERATE_RISK_REPORT_START]")) {
-                                            needGenerateReport[0] = true;
-                                            log.info("检测到报告生成标记: conversationId={}", finalConversationId);
+                                        accumulatedText.append(chunkText);
+                                        
+                                        String fullText = accumulatedText.toString();
+                                        
+                                        // 状态机：根据累积文本判断当前阶段
+                                        // 状态：0=信息收集阶段, 1=启动提示阶段, 2=报告生成阶段, 3=完成提示阶段
+                                        
+                                        // 检测"正在启动风险评估程序"提示（状态1）
+                                        if (fullText.contains("正在启动风险评估程序") && 
+                                            fullText.contains("正在进行专业分析") && 
+                                            fullText.contains("请您稍候")) {
+                                            reportState[0] = 1;
+                                        }
+                                        
+                                        // 检测报告开始（标题格式：关于"xxx与xxx"案的风险评估报告）（状态2）
+                                        if (fullText.contains("关于\"") && fullText.contains("案的风险评估报告")) {
+                                            reportState[0] = 2;
+                                        }
+                                        
+                                        // 检测完成提示（"风险评估报告已生成，请问是否下载"）- 这是InteractiveCoordinatorAgent输出的
+                                        // 当检测到这个提示时，说明报告阶段已结束，切换到完成提示阶段（状态3）
+                                        if (fullText.contains("风险评估报告已生成，请问是否下载")) {
+                                            reportState[0] = 3;
+                                        }
+                                        
+                                        // 根据当前状态确定status
+                                        String status;
+                                        if (reportState[0] == 2) {
+                                            // 报告生成阶段，所有输出都是artifact（包括"风险评估报告已生成完成"标记）
+                                            status = "artifact";
+                                        } else {
+                                            // 其他阶段都是streaming
+                                            status = "streaming";
                                         }
 
-                                        // 如果在报告生成模式中，累积案件描述
-                                        if (needGenerateReport[0]) {
-                                            caseDescriptionBuilder.append(chunkText);
-
-                                            // 检测到结束标记
-                                            if (chunkText.contains("[GENERATE_RISK_REPORT_END]")) {
-                                                String caseDescription = caseDescriptionBuilder.toString();
-                                                // 移除标记本身
-                                                caseDescription = caseDescription
-                                                        .replace("[GENERATE_RISK_REPORT_START]", "")
-                                                        .replace("[GENERATE_RISK_REPORT_END]", "")
-                                                        .trim();
-
-                                                log.info("提取到案件描述，长度={}: conversationId={}",
-                                                        caseDescription.length(), finalConversationId);
-
-                                                // 调用报告生成服务，流式输出
-                                                if (riskReportStreamingService != null) {
-                                                    riskReportStreamingService.generateReportStream(
-                                                            caseDescription,
-                                                            userId,
-                                                            finalConversationId,
-                                                            finalAssistantMessageId
-                                                    ).subscribe(
-                                                            reportChunk -> emitter.next(reportChunk),
-                                                            error -> log.error("报告生成失败", error),
-                                                            () -> log.info("报告生成完成")
-                                                    );
-                                                }
-
-                                                // 重置状态
-                                                needGenerateReport[0] = false;
-                                                caseDescriptionBuilder.setLength(0);
-                                            }
-
-                                            // 跳过常规输出
-                                            return;
-                                        }
-
-                                        // 检测ARTIFACT标签状态
-                                        String fullContent = contentBuilder.toString();
-
-                                        // 检测是否进入ARTIFACT标签
-                                        if (fullContent.contains("<ARTIFACT>") && !fullContent.contains("</ARTIFACT>")) {
-                                            inArtifact[0] = true;
-                                        }
-                                        // 检测是否退出ARTIFACT标签
-                                        else if (fullContent.contains("</ARTIFACT>")) {
-                                            inArtifact[0] = false;
-                                        }
-
-                                        // 根据状态决定status
-                                        String status = inArtifact[0] ? "artifact" : "streaming";
-
-                                        // 发送流式内容事件
                                         StreamChatResponse response = new StreamChatResponse(
                                                 finalAssistantMessageId,
                                                 finalConversationId,

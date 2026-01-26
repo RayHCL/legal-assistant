@@ -27,7 +27,7 @@ public class AuthController {
     @PostMapping("/send-code")
     @Operation(summary = "发送验证码", description = "向指定手机号发送6位数字验证码，验证码有效期5分钟。开发环境下验证码会打印在控制台。")
     public Result<Void> sendCode(@Valid @RequestBody SendCodeRequest request) {
-        authService.sendCode(request.getPhone());
+        authService.sendCode(request.getPhoneNumber());
         return Result.success();
     }
     
