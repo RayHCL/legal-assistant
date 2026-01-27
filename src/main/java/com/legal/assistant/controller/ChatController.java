@@ -2,6 +2,7 @@ package com.legal.assistant.controller;
 
 import com.legal.assistant.common.Result;
 import com.legal.assistant.dto.request.ChatCompletionRequest;
+import com.legal.assistant.dto.response.StreamChatResponse;
 import com.legal.assistant.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,7 +34,7 @@ public class ChatController {
 
     @PostMapping(value = "/completion", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "流式对话", description = "创建流式对话，使用SSE方式返回响应")
-    public Flux<String> chatCompletion(
+    public Flux<StreamChatResponse> chatCompletion(
             @Valid @RequestBody ChatCompletionRequest request,
             HttpServletRequest httpRequest) {
 

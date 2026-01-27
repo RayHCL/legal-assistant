@@ -39,6 +39,13 @@ public class LegalAgentFactory {
     }
 
     /**
+     * 获取Agent实现实例
+     */
+    public ReactLegalAgent getAgentInstance(AgentType agentType) {
+        return getAgentImpl(agentType);
+    }
+
+    /**
      * 获取Agent实现
      */
     private ReactLegalAgent getAgentImpl(AgentType agentType) {

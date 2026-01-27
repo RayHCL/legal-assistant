@@ -3,6 +3,7 @@ package com.legal.assistant.agents.impl;
 import com.legal.assistant.agents.base.ReactLegalAgent;
 import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.agents.factory.LegalAgentFactory;
+import com.legal.assistant.agents.tools.ReportSaveToolService;
 import com.legal.assistant.enums.AgentType;
 import com.legal.assistant.enums.ModelType;
 import io.agentscope.core.ReActAgent;
@@ -21,6 +22,10 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class InteractiveCoordinatorAgent extends ReactLegalAgent {
+    @Autowired(required = false)
+    private ReportSaveToolService reportSaveToolService;
+    @Autowired(required = false)
+    private ReportGenerationAgent reportGenerationAgent;
 
     @Override
     public AgentType getAgentType() {
@@ -52,22 +57,17 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
         if (fileToolService != null) {
             toolkit.registerTool(fileToolService);
         }
-        if (dateToolService != null) {
-            toolkit.registerTool(dateToolService);
+        if (reportSaveToolService != null){
+            toolkit.registerTool(reportSaveToolService);
         }
 
         // 注册报告生成Agent作为子Agent工具
-        if (agentFactory != null) {
+        if (reportGenerationAgent != null) {
             toolkit.registration()
-                    .subAgent(() -> agentFactory.createAgent(
-                                    AgentType.REPORT_GENERATION,
-                                    ModelType.DASHSCOPE_QWEN_MAX,
-                                    0.3,
-                                    agentContext
-                            ),
+                    .subAgent(() -> reportGenerationAgent.configure(modelType, temperature, agentContext),
                             SubAgentConfig.builder()
                                     .toolName("generate_risk_assessment_report")
-                                    .description("生成专业的风险评估报告。使用时机：当信息收集完成，用户确认生成报告时，调用此工具。工具会分析案件信息并进行专业风险评估，最后保存报告到数据库。")
+                                    .description("【重要工具】生成专业的风险评估报告。当收集到完整的案件信息（委托方、对方、诉求、事实、证据）后，必须调用此工具来生成风险评估报告。工具接收案件描述文本，分析后生成包含风险等级、评分、分析和建议的完整报告。")
                                     .forwardEvents(true)  // 启用事件转发，让子Agent的输出能stream出来
                                     .build()
                     )
@@ -78,12 +78,15 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
                 .register(agentContext)
                 .build();
 
+        // 获取系统提示词并注入当前时间
+        String systemPrompt = injectCurrentTime(getSystemPrompt());
+
         return ReActAgent.builder()
                 .name(getAgentType().getCode())
-                .sysPrompt(getSystemPrompt())
+                .sysPrompt(systemPrompt)
                 .model(model)
                 .memory(memory)
-                .maxIters(maxIterations)
+                .maxIters(10)  // 增加迭代次数，确保有足够的机会调用工具
                 .toolkit(toolkit)
                 .toolExecutionContext(context)
                 .build();
@@ -94,11 +97,7 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
         return 0.7;
     }
 
-    // ==================== 依赖注入 ====================
 
-    @Lazy
-    @Autowired(required = false)
-    private LegalAgentFactory agentFactory;
 
     // ==================== 系统提示词 ====================
 
@@ -109,9 +108,12 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
             # 角色定位
             您是法律事务协调专员，负责快速收集案件信息并协调风险评估系统出具报告。
 
+            # 当前时间
+            {current_time}
+
             # 信息收集要求
 
-            ## 信息收集
+            ## 必需信息
             1. 委托方名称及法律地位（如：原告/被告/买方/卖方等）
             2. 相对方名称及法律地位
             3. 核心诉求
@@ -120,37 +122,52 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
 
             # 工作流程
 
-            ## 一步到位收集信息
-            用户发起请求后：
-            1. 快速检查用户是否已提供必需信息
-            2. 如已提供，直接生成报告；如缺失，一次性列出缺失项要求补充
-            3. 不反复确认，不多次追问
+            ## 第一步：信息检查
+            收到用户请求后，立即检查是否已包含上述5项必需信息。
 
-            ## 立即启动评估
-            信息完整后，严格按照以下步骤执行：
-            1. **第一步**：先输出以下文字（必须完整输出，不要修改）：
+            ## 第二步：收集缺失信息
+            如果信息不完整，一次性列出所有缺失项，要求用户补充。
+            示例："为了准确评估风险，我还需要以下信息：1.委托方身份 2.核心诉求金额..."
+
+            ## 第三步：立即启动评估（关键步骤）
+            一旦收集到完整信息，**必须**按照以下步骤执行：
+
+            1. **输出启动提示**（必须原样输出）：
                "正在启动风险评估程序，正在进行专业分析，请您稍候..."
-            2. **第二步**：立即调用 generate_risk_assessment_report 工具，传入收集到的完整案件信息
-            3. **第三步**：等待工具执行完成（工具会生成完整的风险评估报告并流式输出）
-            4. **第四步**：工具返回后，输出以下文字（必须完整输出，不要修改）：
-               "风险评估报告已生成，请问是否下载"
-            5. **第五步**：停止输出，不要再添加任何内容
 
-            # 沟通原则
-            - 简洁高效，一次性提问
-            - 不反复核对，不过度确认
-            - 专业但不刻板
-            - 输出标记后立即停止
+            2. **立即调用 generate_risk_assessment_report 工具**：
+               - 这是必须的步骤，不能跳过
+               - 调用示例：
+                 Action: generate_risk_assessment_report
+                 Action Input: {"caseInfo": "委托方：张三（原告）；对方：李四面馆（被告）；核心诉求：索赔1000元；基本事实：2024年X月X日在李四面馆就餐发现苍蝇，已取证；现有证据：照片、付款记录"}
+               - 将收集到的所有案件信息作为参数传入
+
+            3. **等待工具执行完成**（工具会输出完整的风险评估报告）
+
+            4. **输出完成提示**（必须原样输出）：
+               "风险评估报告已生成，请问是否下载"
 
             # 可用工具
 
-            - **getCurrentDate**：获取当前日期
-            - **getFileContent**：查看用户提供的文件内容
+            1. **generate_risk_assessment_report**（最重要的工具）
+               - 作用：生成专业的风险评估报告
+               - 使用时机：信息收集完成后，必须立即调用
+               - 参数格式：案件描述文本（包含委托方、对方、诉求、事实、证据）
+               - 重要：这是唯一能生成报告的方式，不能自己生成
 
-            # 重要提示
+            2. **getFileContent**
+               - 作用：查看用户提供的文件内容
 
-            - 信息收集完成后立即输出标记和案件信息
-            - 缺失信息一次性列出，不逐项追问
-            - 
+            3. **generate_download_link**
+               - 作用：生成报告下载链接
+               - 参数：报告编号
+
+            # 关键原则
+
+            - ✅ 信息完整后必须调用 generate_risk_assessment_report 工具
+            - ❌ 不要跳过工具直接生成报告内容
+            - ❌ 不要反复追问，一次性列出所有缺失信息
+            - ✅ 使用工具后等待工具输出完成
+            - ✅ 工具调用是必须的，不是可选项
             """;
 }

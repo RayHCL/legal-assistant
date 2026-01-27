@@ -12,19 +12,42 @@ import lombok.NoArgsConstructor;
 public class StreamChatResponse {
     @Schema(description = "消息ID", example = "1")
     private Long messageId;
-    
+
     @Schema(description = "会话ID", example = "1")
     private Long conversationId;
-    
+
     @Schema(description = "流式内容片段", example = "根据")
     private String content;
-    
-    @Schema(description = "状态：thinking（思考中）、streaming（流式输出中）、artifact（报告/文件输出）、completed（完成）、error（错误）", example = "streaming")
+
+    @Schema(description = "状态：thinking（思考中）、message（普通消息）、artifact（报告/文件输出）、tool_call（工具调用）、tool_result（工具结果）、completed（完成）、error（错误）", example = "message")
     private String status;
-    
+
     @Schema(description = "自动生成的标题（仅在首次对话时返回）", example = "关于合同纠纷的咨询")
     private String generatedTitle;
-    
+
     @Schema(description = "是否完成", example = "false")
     private Boolean finished;
+
+    @Schema(description = "工具调用信息（仅当status为tool_call或tool_result时有值）")
+    private ToolCallInfo toolCall;
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ToolCallInfo {
+        @Schema(description = "工具名称")
+        private String toolName;
+
+        @Schema(description = "工具调用参数（JSON格式）")
+        private String toolArgs;
+
+        @Schema(description = "工具执行结果（仅tool_result时有值）")
+        private String toolResult;
+
+        @Schema(description = "是否为工具调用")
+        private Boolean isToolCall;
+
+        @Schema(description = "是否为工具结果")
+        private Boolean isToolResult;
+    }
 }

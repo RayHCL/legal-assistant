@@ -1,6 +1,7 @@
 package com.legal.assistant.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.legal.assistant.agents.base.ReactLegalAgent;
 import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.agents.factory.LegalAgentFactory;
 import com.legal.assistant.dto.request.ChatCompletionRequest;
@@ -15,11 +16,7 @@ import com.legal.assistant.exception.ErrorCode;
 import com.legal.assistant.mapper.ConversationMapper;
 import com.legal.assistant.mapper.MessageMapper;
 import io.agentscope.core.ReActAgent;
-import io.agentscope.core.agent.EventType;
-import io.agentscope.core.agent.StreamOptions;
 import io.agentscope.core.memory.Memory;
-import io.agentscope.core.message.Msg;
-import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.session.JsonSession;
 import io.agentscope.core.session.SessionManager;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
@@ -78,14 +76,13 @@ public class ChatService {
     @Autowired
     private MessageMapper messageMapper;
 
-    @Autowired(required = false)
-    private RiskReportStreamingService riskReportStreamingService;
+
 
 
     /**
      * 创建流式对话
      */
-    public Flux<String> createChatStream(Long userId, ChatCompletionRequest request) {
+    public Flux<StreamChatResponse> createChatStream(Long userId, ChatCompletionRequest request) {
         Long conversationId = request.getConversationId();
         String generatedTitle = null;
 
@@ -164,162 +161,81 @@ public class ChatService {
             final Memory memory = sessionEntry.memory;
             final SessionManager sessionManager = sessionEntry.sessionManager;
 
-            // 7. 配置流式输出选项
-            StreamOptions streamOptions = StreamOptions.builder()
-                    .eventTypes(EventType.REASONING, EventType.TOOL_RESULT)
-                    .incremental(true)
-                    .includeReasoningResult(false)
-                    .build();
+            // 7. 创建停止信号
+            Sinks.Empty<Void> stopSignal = Sinks.empty();
+            activeStreams.put(finalConversationId, stopSignal);
 
-            // 8. 创建输入消息
-            Msg inputMsg = Msg.builder()
-                    .role(MsgRole.USER)
-                    .textContent(fullPrompt.toString())
-                    .build();
+            // 8. 获取Agent实例
+            ReactLegalAgent reactAgent = agentFactory.getAgentInstance(request.getAgentType());
 
             // 9. 用于累积完整内容
             StringBuilder contentBuilder = new StringBuilder();
 
-            // 10. 创建停止信号
-            Sinks.Empty<Void> stopSignal = Sinks.empty();
-            activeStreams.put(finalConversationId, stopSignal);
+            // 10. 执行流式推理
+            return reactAgent.streamChat(
+                            agent,
+                            fullPrompt.toString(),
+                            finalAssistantMessageId,
+                            finalConversationId
+                    )
+                    .subscribeOn(Schedulers.boundedElastic())
+                    .takeUntilOther(Flux.from(stopSignal.asMono()).doOnNext(v -> {
+                        log.info("收到停止信号: conversationId={}", finalConversationId);
+                    }))
+                    .doOnNext(response -> {
+                        // 累积完整内容
+                        if (response != null && response.getContent() != null) {
+                            contentBuilder.append(response.getContent());
+                        }
+                    })
+                    .doOnComplete(() -> {
+                        // 清理上下文和停止信号
+                        activeStreams.remove(finalConversationId);
+                        // 保存 Agent 会话记忆
+                        saveAgentSession(finalConversationId);
 
-            // 用于跟踪报告生成状态
-            // 状态：0=信息收集阶段, 1=启动提示阶段, 2=报告生成阶段, 3=完成提示阶段
-            final int[] reportState = {0};
-            final StringBuilder accumulatedText = new StringBuilder();
+                        // 更新消息状态为完成
+                        assistantMessage.setContent(contentBuilder.toString());
+                        assistantMessage.setStatus("completed");
+                        messageMapper.updateById(assistantMessage);
+                    })
+                    .doOnError(error -> {
+                        // 清理上下文和停止信号
+                        activeStreams.remove(finalConversationId);
 
-            // 11. 执行流式推理
-            return Flux.create(emitter -> {
-                // 获取停止信号
-                Sinks.Empty<Void> currentStopSignal = activeStreams.get(finalConversationId);
+                        // 保存 Agent 会话记忆（即使出错也保存）
+                        saveAgentSession(finalConversationId);
 
-                agent.stream(inputMsg, streamOptions)
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .takeUntilOther(Flux.from(currentStopSignal.asMono()).doOnNext(v -> {
-                            log.info("收到停止信号: conversationId={}", finalConversationId);
-                        }))
-                        .doOnComplete(() -> {
-                            // 清理上下文和停止信号
-                            activeStreams.remove(finalConversationId);
-                            // 保存 Agent 会话记忆
-                            saveAgentSession(finalConversationId);
-
-                            // 更新消息状态为完成
-                            assistantMessage.setContent(contentBuilder.toString());
-                            assistantMessage.setStatus("completed");
-                            messageMapper.updateById(assistantMessage);
-
-                            // 发送完成事件
-                            try {
-                                StreamChatResponse response = new StreamChatResponse(
-                                        finalAssistantMessageId,
-                                        finalConversationId,
-                                        "",
-                                        "completed",
-                                        finalGeneratedTitle,
-                                        true
-                                );
-                                emitter.next(objectMapper.writeValueAsString(response));
-                                emitter.complete();
-                            } catch (Exception e) {
-                                log.error("发送完成事件失败", e);
-                                emitter.error(e);
-                            }
-                        })
-                        .doOnError(error -> {
-                            // 清理上下文和停止信号
-                            activeStreams.remove(finalConversationId);
-
-                            // 保存 Agent 会话记忆（即使出错也保存）
-                            saveAgentSession(finalConversationId);
-
-                            log.error("Agent流式推理失败: conversationId={}", finalConversationId, error);
-                            try {
-                                // 更新消息状态为错误
-                                assistantMessage.setStatus("error");
-                                messageMapper.updateById(assistantMessage);
-
-                                StreamChatResponse response = new StreamChatResponse(
-                                        finalAssistantMessageId,
-                                        finalConversationId,
-                                        error.getMessage(),
-                                        "error",
-                                        null,
-                                        true
-                                );
-                                emitter.next(objectMapper.writeValueAsString(response));
-                                emitter.complete();
-                            } catch (Exception e) {
-                                log.error("发送错误事件失败", e);
-                                emitter.error(error);
-                            }
-                        })
-                        .doOnCancel(() -> {
-
-                            activeStreams.remove(finalConversationId);
-                            log.info("流被取消: conversationId={}", finalConversationId);
-                        })
-                        .subscribe(event -> {
-                            try {
-                                Msg message = event.getMessage();
-                                if (message != null) {
-                                    String chunkText = message.getTextContent();
-
-                                    if (chunkText != null && !chunkText.isEmpty()) {
-                                        // 累积完整内容
-                                        contentBuilder.append(chunkText);
-                                        accumulatedText.append(chunkText);
-                                        
-                                        String fullText = accumulatedText.toString();
-                                        
-                                        // 状态机：根据累积文本判断当前阶段
-                                        // 状态：0=信息收集阶段, 1=启动提示阶段, 2=报告生成阶段, 3=完成提示阶段
-                                        
-                                        // 检测"正在启动风险评估程序"提示（状态1）
-                                        if (fullText.contains("正在启动风险评估程序") && 
-                                            fullText.contains("正在进行专业分析") && 
-                                            fullText.contains("请您稍候")) {
-                                            reportState[0] = 1;
-                                        }
-                                        
-                                        // 检测报告开始（标题格式：关于"xxx与xxx"案的风险评估报告）（状态2）
-                                        if (fullText.contains("关于\"") && fullText.contains("案的风险评估报告")) {
-                                            reportState[0] = 2;
-                                        }
-                                        
-                                        // 检测完成提示（"风险评估报告已生成，请问是否下载"）- 这是InteractiveCoordinatorAgent输出的
-                                        // 当检测到这个提示时，说明报告阶段已结束，切换到完成提示阶段（状态3）
-                                        if (fullText.contains("风险评估报告已生成，请问是否下载")) {
-                                            reportState[0] = 3;
-                                        }
-                                        
-                                        // 根据当前状态确定status
-                                        String status;
-                                        if (reportState[0] == 2) {
-                                            // 报告生成阶段，所有输出都是artifact（包括"风险评估报告已生成完成"标记）
-                                            status = "artifact";
-                                        } else {
-                                            // 其他阶段都是streaming
-                                            status = "streaming";
-                                        }
-
-                                        StreamChatResponse response = new StreamChatResponse(
-                                                finalAssistantMessageId,
-                                                finalConversationId,
-                                                chunkText,
-                                                status,
-                                                null,
-                                                false
-                                        );
-                                        emitter.next(objectMapper.writeValueAsString(response));
-                                    }
-                                }
-                            } catch (Exception e) {
-                                log.error("处理流式事件失败", e);
-                            }
-                        });
-            });
+                        log.error("Agent流式推理失败: conversationId={}", finalConversationId, error);
+                        // 更新消息状态为错误
+                        assistantMessage.setStatus("error");
+                        messageMapper.updateById(assistantMessage);
+                    })
+                    .doOnCancel(() -> {
+                        activeStreams.remove(finalConversationId);
+                        log.info("流被取消: conversationId={}", finalConversationId);
+                    })
+                    .concatWith(Mono.defer(() -> {
+                        // 发送完成响应
+                        return Mono.just(reactAgent.createCompletionResponse(
+                                finalAssistantMessageId,
+                                finalConversationId,
+                                finalGeneratedTitle,
+                                false,
+                                null
+                        ));
+                    }))
+                    .onErrorResume(error -> {
+                        // 发送错误响应
+                        StreamChatResponse errorResponse = reactAgent.createCompletionResponse(
+                                finalAssistantMessageId,
+                                finalConversationId,
+                                null,
+                                true,
+                                error.getMessage()
+                        );
+                        return Mono.just(errorResponse);
+                    });
 
         } catch (Exception e) {
             log.error("创建流式对话失败: userId={}, conversationId={}", userId, conversationId, e);

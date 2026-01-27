@@ -122,11 +122,6 @@ public class RiskReport {
      */
     private String minioPath;
 
-    /**
-     * 报告文件路径（PDF）- 已废弃，使用minioPath
-     */
-    @Deprecated
-    private String reportFilePath;
 
     /**
      * 下载链接
