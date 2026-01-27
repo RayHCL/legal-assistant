@@ -1,6 +1,5 @@
 package com.legal.assistant.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.legal.assistant.agents.base.ReactLegalAgent;
 import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.agents.factory.LegalAgentFactory;
@@ -8,6 +7,7 @@ import com.legal.assistant.dto.request.ChatCompletionRequest;
 import com.legal.assistant.dto.response.StreamChatResponse;
 import com.legal.assistant.entity.Conversation;
 import com.legal.assistant.entity.Message;
+import com.legal.assistant.entity.RiskReport;
 import com.legal.assistant.enums.AgentType;
 import com.legal.assistant.enums.MessageRole;
 import com.legal.assistant.enums.ModelType;
@@ -15,6 +15,7 @@ import com.legal.assistant.exception.BusinessException;
 import com.legal.assistant.exception.ErrorCode;
 import com.legal.assistant.mapper.ConversationMapper;
 import com.legal.assistant.mapper.MessageMapper;
+import com.legal.assistant.mapper.RiskReportMapper;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.session.JsonSession;
@@ -39,7 +40,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class ChatService {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // 管理活跃的流，key 是 conversationId，value 是用于停止流的 Sinks
     private final ConcurrentHashMap<Long, Sinks.Empty<Void>> activeStreams = new ConcurrentHashMap<>();
@@ -75,6 +75,9 @@ public class ChatService {
 
     @Autowired
     private MessageMapper messageMapper;
+
+    @Autowired
+    private RiskReportMapper riskReportMapper;
 
 
 
@@ -170,22 +173,30 @@ public class ChatService {
 
             // 9. 用于累积完整内容
             StringBuilder contentBuilder = new StringBuilder();
+            StringBuilder reportBuilder = new StringBuilder();
 
             // 10. 执行流式推理
+            boolean supportsThinking = request.getModelType() != null && request.getModelType().isSupportsThinking();
             return reactAgent.streamChat(
                             agent,
                             fullPrompt.toString(),
                             finalAssistantMessageId,
-                            finalConversationId
+                            finalConversationId,
+                            supportsThinking
                     )
                     .subscribeOn(Schedulers.boundedElastic())
                     .takeUntilOther(Flux.from(stopSignal.asMono()).doOnNext(v -> {
                         log.info("收到停止信号: conversationId={}", finalConversationId);
                     }))
                     .doOnNext(response -> {
-                        // 累积完整内容
+                        // 累积完整内容（不落库thinking）
                         if (response != null && response.getContent() != null) {
-                            contentBuilder.append(response.getContent());
+                            if ("artifact".equals(response.getStatus())) {
+                                reportBuilder.append(response.getContent());
+                            }
+                            if (!"thinking".equals(response.getStatus())) {
+                                contentBuilder.append(response.getContent());
+                            }
                         }
                     })
                     .doOnComplete(() -> {
@@ -193,6 +204,9 @@ public class ChatService {
                         activeStreams.remove(finalConversationId);
                         // 保存 Agent 会话记忆
                         saveAgentSession(finalConversationId);
+
+                        // 保存子智能体输出的报告内容
+                        saveStreamedReport(userId, finalConversationId, finalAssistantMessageId, reportBuilder.toString());
 
                         // 更新消息状态为完成
                         assistantMessage.setContent(contentBuilder.toString());
@@ -293,6 +307,28 @@ public class ChatService {
                 conversationId, memory.getMessages().size());
 
         return entry;
+    }
+
+    private void saveStreamedReport(Long userId, Long conversationId, Long messageId, String reportContent) {
+        if (reportContent == null || reportContent.isBlank()) {
+            return;
+        }
+
+        RiskReport report = new RiskReport();
+        report.setReportId(generateReportId());
+        report.setUserId(userId);
+        report.setConversationId(conversationId);
+        report.setMessageId(messageId);
+        report.setFullReportContent(reportContent);
+        report.setCreatedAt(LocalDateTime.now());
+        report.setUpdatedAt(LocalDateTime.now());
+        riskReportMapper.insert(report);
+    }
+
+    private String generateReportId() {
+        String timestamp = java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS")
+                .format(LocalDateTime.now());
+        return "RPT" + timestamp;
     }
 
     /**

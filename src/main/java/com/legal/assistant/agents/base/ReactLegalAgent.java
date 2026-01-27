@@ -1,5 +1,6 @@
 package com.legal.assistant.agents.base;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.legal.assistant.agents.context.AgentContext;
 import com.legal.assistant.agents.tools.FileToolService;
@@ -16,8 +17,11 @@ import io.agentscope.core.memory.InMemoryMemory;
 import io.agentscope.core.memory.autocontext.AutoContextConfig;
 import io.agentscope.core.memory.autocontext.AutoContextMemory;
 import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.ToolExecutionContext;
 import io.agentscope.core.tool.Toolkit;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * ReAct法律Agent基类
@@ -35,6 +40,7 @@ import java.time.format.DateTimeFormatter;
 @Slf4j
 public abstract class ReactLegalAgent {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Value("${ai.dashscope.api-key}")
     protected String apiKey;
@@ -161,13 +167,14 @@ public abstract class ReactLegalAgent {
             ReActAgent agent,
             String userInput,
             Long messageId,
-            Long conversationId) {
+            Long conversationId,
+            boolean supportsThinking) {
 
         // 配置流式输出选项 - 接收所有类型的事件
         StreamOptions streamOptions = StreamOptions.builder()
                 .eventTypes(EventType.ALL)  // 接收所有事件，包括REASONING, TOOL_RESULT, 普通文本等
                 .incremental(true)
-                .includeReasoningResult(false)  // 不包含推理过程结果，只包含最终输出
+                .includeReasoningResult(false)
                 .includeActingChunk(true)
                 .build();
 
@@ -177,95 +184,74 @@ public abstract class ReactLegalAgent {
                 .textContent(userInput)
                 .build();
 
-        // 用于累积完整内容（用于状态判断）
-        final StringBuilder accumulatedText = new StringBuilder();
-
-        // 状态：0=正常输出, 1=报告开始检测, 2=报告生成中
-        final int[] reportState = {0};
+        // 是否已有增量输出（防止final_result重复完整内容）
+        final boolean[] hasIncrementalOutput = {false};
+        // 子Agent完成提示缓冲（避免转发输出完成提示）
+        final String reportCompletedMarker = "风险评估报告已生成完成";
+        final StringBuilder forwardedMarkerBuffer = new StringBuilder();
 
         // 执行流式推理并组装响应
         return agent.stream(inputMsg, streamOptions)
-                .filter(event -> {
-                    // 保留所有有内容的事件
-                    Msg message = event.getMessage();
-                    if (message == null) {
-                        return false;
-                    }
-
-                    String content = message.getTextContent();
-                    // 只要有内容就保留
-                    return content != null && !content.isEmpty();
-                })
                 .map(event -> {
-                    EventType eventType = event.getType();
                     Msg message = event.getMessage();
-                    String content = message.getTextContent();
+                    String rawContent = extractTextContent(message);
+                    ForwardedEvent forwardedEvent = unwrapForwardedEvent(rawContent);
+                    String content = forwardedEvent.isForwardedEvent ? forwardedEvent.text : rawContent;
+                    return new StreamEventPayload(event, content, forwardedEvent.isForwardedEvent);
+                })
+                .filter(payload -> payload.content != null && !payload.content.isEmpty())
+                .handle((payload, sink) -> {
+                    EventType eventType = payload.event.getType();
+                    String content = payload.content;
+                    boolean isForwardedEvent = payload.isForwardedEvent;
 
-                    // 根据事件类型和内容判断status
+                    // 根据事件类型判断status
                     String status;
+                    boolean isFinalResult = isFinalResultEvent(eventType);
 
-                    if (eventType == EventType.TOOL_RESULT) {
-                        // 🔧 工具结果（明确的事件类型）
-                        log.info("📢 [TOOL_RESULT] 工具结果: {}", content);
-                        return createToolResultResponse(message, messageId, conversationId);
-                    } else if (eventType == EventType.REASONING) {
-                        // REASONING 事件需要根据内容判断具体类型
-
-                        // 检查是否是工具返回的简单内容（日期、时间、数字等）
-                        boolean isToolResult = false;
-
-                        // 日期格式：2026-01-27
-                        if (content.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
-                            isToolResult = true;
+                    if (isForwardedEvent) {
+                        // 过滤子Agent的完成提示（可能被拆分为多段）
+                        if (content != null && !content.isEmpty()) {
+                            forwardedMarkerBuffer.append(content);
+                            String buffered = forwardedMarkerBuffer.toString();
+                            if (reportCompletedMarker.startsWith(buffered)) {
+                                if (reportCompletedMarker.equals(buffered)) {
+                                    forwardedMarkerBuffer.setLength(0);
+                                }
+                                return;
+                            }
+                            // 非完成提示，合并缓冲内容作为真实输出
+                            content = buffered;
+                            forwardedMarkerBuffer.setLength(0);
                         }
-                        // 时间格式：12:34:56
-                        else if (content.matches("^\\d{2}:\\d{2}:\\d{2}$")) {
-                            isToolResult = true;
-                        }
-                        // 纯数字
-                        else if (content.matches("^\\d+$")) {
-                            isToolResult = true;
-                        }
-                        // URL格式（MinIO路径等）
-                        else if (content.matches("^(http|https|minio)://.*")) {
-                            isToolResult = true;
-                        }
-                        // 文件路径
-                        else if (content.matches("^[\\w-]+\\.md$")) {
-                            isToolResult = true;
-                        }
-                        // 报告ID格式
-                        else if (content.matches("^RPT\\d+$")) {
-                            isToolResult = true;
-                        }
-
-                        if (isToolResult) {
-                            log.info("📢 [TOOL_RESULT] 工具结果(识别): {}", content);
-                            return createToolResultResponse(message, messageId, conversationId);
-                        }
-
-                        // 累积内容用于更准确的判断
-                        accumulatedText.append(content);
-                        String fullText = accumulatedText.toString();
-
-                        // 检查是否是报告开始
-                        if (fullText.contains("关于\"") && fullText.contains("案的风险评估报告")) {
-                            status = "artifact";
-                            log.info("📢 [ARTIFACT] 报告内容: {}", content.substring(0, Math.min(50, content.length())));
-                        } else {
-                            // 默认为普通消息
-                            status = "message";
-                            log.debug("📢 [MESSAGE] 普通消息: {}", content.substring(0, Math.min(50, content.length())));
-                        }
-                    } else {
-                        // 其他事件类型，使用子类定制的状态判断
-                        accumulatedText.append(content);
-                        String fullText = accumulatedText.toString();
-                        status = determineStreamStatus(content, fullText, reportState);
-                        log.debug("📢 [{}] 状态: {}", status, content.substring(0, Math.min(50, content.length())));
+                    } else if (forwardedMarkerBuffer.length() > 0) {
+                        // 非转发事件到来，清空可能残留的完成提示缓冲
+                        forwardedMarkerBuffer.setLength(0);
                     }
 
-                    return new StreamChatResponse(
+                    boolean isReportCompletedMarker = reportCompletedMarker.equals(content.trim());
+
+                    if (eventType == EventType.REASONING || (isForwardedEvent && !isFinalResult)) {
+                        hasIncrementalOutput[0] = true;
+                    }
+
+                    if (isFinalResult && hasIncrementalOutput[0]) {
+                        // 已有增量输出时，跳过final_result的重复完整内容
+                        return;
+                    } else if (isReportCompletedMarker) {
+                        status = "message";
+                    } else if (isForwardedEvent) {
+                        // 子Agent输出（报告生成），统一标记为artifact
+                        status = "artifact";
+                    } else if (eventType == EventType.REASONING) {
+                        // REASONING 仅在模型支持深度思考时标记为thinking
+                        status = supportsThinking ? "thinking" : "message";
+                    } else {
+                        // 其他事件默认普通消息
+                        status = "message";
+                    }
+
+                    sink.next(new StreamChatResponse(
                             messageId,
                             conversationId,
                             content,
@@ -273,40 +259,109 @@ public abstract class ReactLegalAgent {
                             null, // 中间过程不返回title
                             false,
                             null // 普通文本没有工具调用信息
-                    );
-                })
-                .filter(response -> response != null);
+                    ));
+                });
     }
 
-    /**
-     * 创建工具结果响应
-     */
-    private StreamChatResponse createToolResultResponse(Msg message, Long messageId, Long conversationId) {
-        try {
-            String toolResult = message.getTextContent() != null ? message.getTextContent() : "";
-
-            log.info("📢 [TOOL_RESULT] 创建工具结果响应: {}", toolResult.substring(0, Math.min(50, toolResult.length())));
-
-            StreamChatResponse.ToolCallInfo toolCallInfo = new StreamChatResponse.ToolCallInfo(
-                    "tool", // 工具名
-                    null,
-                    toolResult,
-                    false,
-                    true
-            );
-
-            return new StreamChatResponse(
-                    messageId,
-                    conversationId,
-                    toolResult,
-                    "tool_result",
-                    null,
-                    false,
-                    toolCallInfo
-            );
-        } catch (Exception e) {
-            log.error("创建工具结果响应失败", e);
+    private String extractTextContent(Msg message) {
+        if (message == null) {
             return null;
+        }
+
+        String textContent = message.getTextContent();
+        if (textContent != null && !textContent.isEmpty()) {
+            return textContent;
+        }
+
+        List<ToolResultBlock> toolResults = message.getContentBlocks(ToolResultBlock.class);
+        if (toolResults == null || toolResults.isEmpty()) {
+            return textContent;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (ToolResultBlock toolResult : toolResults) {
+            List<ContentBlock> output = toolResult.getOutput();
+            if (output == null || output.isEmpty()) {
+                continue;
+            }
+            for (ContentBlock block : output) {
+                if (block instanceof TextBlock) {
+                    if (builder.length() > 0) {
+                        builder.append("\n");
+                    }
+                    builder.append(((TextBlock) block).getText());
+                }
+            }
+        }
+
+        return builder.length() > 0 ? builder.toString() : textContent;
+    }
+
+    private ForwardedEvent unwrapForwardedEvent(String rawContent) {
+        if (rawContent == null || rawContent.isBlank()) {
+            return ForwardedEvent.notForwarded(rawContent);
+        }
+
+        String trimmed = rawContent.trim();
+        if (!trimmed.startsWith("{") || !trimmed.contains("\"type\"") || !trimmed.contains("\"message\"")) {
+            return ForwardedEvent.notForwarded(rawContent);
+        }
+
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(trimmed);
+            if (!root.has("type") || !root.has("message")) {
+                return ForwardedEvent.notForwarded(rawContent);
+            }
+
+            JsonNode messageNode = root.get("message");
+            JsonNode contentNode = messageNode != null ? messageNode.get("content") : null;
+            if (contentNode == null || !contentNode.isArray()) {
+                return ForwardedEvent.forwarded("");
+            }
+
+            StringBuilder builder = new StringBuilder();
+            for (JsonNode block : contentNode) {
+                if (block != null && "text".equals(block.path("type").asText())) {
+                    String text = block.path("text").asText("");
+                    if (!text.isEmpty()) {
+                        builder.append(text);
+                    }
+                }
+            }
+
+            return ForwardedEvent.forwarded(builder.toString());
+        } catch (Exception e) {
+            return ForwardedEvent.notForwarded(rawContent);
+        }
+    }
+
+    private static class ForwardedEvent {
+        private final boolean isForwardedEvent;
+        private final String text;
+
+        private ForwardedEvent(boolean isForwardedEvent, String text) {
+            this.isForwardedEvent = isForwardedEvent;
+            this.text = text;
+        }
+
+        static ForwardedEvent forwarded(String text) {
+            return new ForwardedEvent(true, text);
+        }
+
+        static ForwardedEvent notForwarded(String text) {
+            return new ForwardedEvent(false, text);
+        }
+    }
+
+    private static class StreamEventPayload {
+        private final io.agentscope.core.agent.Event event;
+        private final String content;
+        private final boolean isForwardedEvent;
+
+        private StreamEventPayload(io.agentscope.core.agent.Event event, String content, boolean isForwardedEvent) {
+            this.event = event;
+            this.content = content;
+            this.isForwardedEvent = isForwardedEvent;
         }
     }
 
@@ -344,5 +399,16 @@ public abstract class ReactLegalAgent {
         // 默认实现：所有输出都是普通消息
         // 子类（如ReportGenerationAgent）可以重写此方法来实现特殊的状态判断
         return "message";
+    }
+
+    /**
+     * 判断是否为final_result事件
+     */
+    protected boolean isFinalResultEvent(EventType eventType) {
+        if (eventType == null) {
+            return false;
+        }
+        String eventName = eventType.name();
+        return "FINAL_RESULT".equals(eventName) || "FINAL".equals(eventName);
     }
 }

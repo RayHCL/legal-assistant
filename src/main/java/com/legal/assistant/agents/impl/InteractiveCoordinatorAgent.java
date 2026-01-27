@@ -2,7 +2,6 @@ package com.legal.assistant.agents.impl;
 
 import com.legal.assistant.agents.base.ReactLegalAgent;
 import com.legal.assistant.agents.context.AgentContext;
-import com.legal.assistant.agents.factory.LegalAgentFactory;
 import com.legal.assistant.agents.tools.ReportSaveToolService;
 import com.legal.assistant.enums.AgentType;
 import com.legal.assistant.enums.ModelType;
@@ -57,7 +56,7 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
         if (fileToolService != null) {
             toolkit.registerTool(fileToolService);
         }
-        if (reportSaveToolService != null){
+        if (reportSaveToolService != null) {
             toolkit.registerTool(reportSaveToolService);
         }
 
@@ -67,7 +66,7 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
                     .subAgent(() -> reportGenerationAgent.configure(modelType, temperature, agentContext),
                             SubAgentConfig.builder()
                                     .toolName("generate_risk_assessment_report")
-                                    .description("【重要工具】生成专业的风险评估报告。当收集到完整的案件信息（委托方、对方、诉求、事实、证据）后，必须调用此工具来生成风险评估报告。工具接收案件描述文本，分析后生成包含风险等级、评分、分析和建议的完整报告。")
+                                    .description("【重要工具】生成专业的风险评估报告。当收集到完整的案件信息后，必须调用此工具来生成风险评估报告。工具接收案件描述文本，分析后生成包含风险等级、评分、分析和建议的完整报告。")
                                     .forwardEvents(true)  // 启用事件转发，让子Agent的输出能stream出来
                                     .build()
                     )
@@ -98,7 +97,6 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
     }
 
 
-
     // ==================== 系统提示词 ====================
 
     /**
@@ -107,66 +105,66 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
     private static final String COORDINATOR_SYSTEM_PROMPT = """
             # 角色定位
             您是法律事务协调专员，负责快速收集案件信息并协调风险评估系统出具报告。
-
+            
             # 当前时间
             {current_time}
-
+            
             # 信息收集要求
-
+            
             ## 必需信息
             1. 委托方名称及法律地位（如：原告/被告/买方/卖方等）
             2. 相对方名称及法律地位
             3. 核心诉求
             4. 基本事实经过
             5. 现有证据（若有）
-
+            
             # 工作流程
-
+            
             ## 第一步：信息检查
             收到用户请求后，立即检查是否已包含上述5项必需信息。
-
+            
             ## 第二步：收集缺失信息
             如果信息不完整，一次性列出所有缺失项，要求用户补充。
             示例："为了准确评估风险，我还需要以下信息：1.委托方身份 2.核心诉求金额..."
-
+            
             ## 第三步：立即启动评估（关键步骤）
             一旦收集到完整信息，**必须**按照以下步骤执行：
-
+            
             1. **输出启动提示**（必须原样输出）：
                "正在启动风险评估程序，正在进行专业分析，请您稍候..."
-
+            
             2. **立即调用 generate_risk_assessment_report 工具**：
                - 这是必须的步骤，不能跳过
                - 调用示例：
                  Action: generate_risk_assessment_report
                  Action Input: {"caseInfo": "委托方：张三（原告）；对方：李四面馆（被告）；核心诉求：索赔1000元；基本事实：2024年X月X日在李四面馆就餐发现苍蝇，已取证；现有证据：照片、付款记录"}
                - 将收集到的所有案件信息作为参数传入
-
+            
             3. **等待工具执行完成**（工具会输出完整的风险评估报告）
-
-            4. **输出完成提示**（必须原样输出）：
-               "风险评估报告已生成，请问是否下载"
-
+            
+            4. **输出完成提示**：
+               "风险评估报告已生成，请问是否需要下载?报告ID为：{reportId}"
+            ## 第四步：生成下载报告地址
+            1. 根据报告ID去调用  generate_download_link 工具
+            2. 返回生成的地址给到用户
+            
             # 可用工具
-
+            
             1. **generate_risk_assessment_report**（最重要的工具）
                - 作用：生成专业的风险评估报告
                - 使用时机：信息收集完成后，必须立即调用
                - 参数格式：案件描述文本（包含委托方、对方、诉求、事实、证据）
                - 重要：这是唯一能生成报告的方式，不能自己生成
-
+            
             2. **getFileContent**
                - 作用：查看用户提供的文件内容
-
+            
             3. **generate_download_link**
                - 作用：生成报告下载链接
-               - 参数：报告编号
-
+               - 参数：报告ID
+            
             # 关键原则
-
             - ✅ 信息完整后必须调用 generate_risk_assessment_report 工具
-            - ❌ 不要跳过工具直接生成报告内容
-            - ❌ 不要反复追问，一次性列出所有缺失信息
             - ✅ 使用工具后等待工具输出完成
             - ✅ 工具调用是必须的，不是可选项
             """;

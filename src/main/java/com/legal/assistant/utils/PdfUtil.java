@@ -131,7 +131,5 @@ public class PdfUtil {
         }
     }
 
-    public static void main(String[] args) {
-        doc2pdf("/Users/rayhu/Desktop/123.docx", "/Users/rayhu/Desktop/123-trans.pdf");
-    }
+
 }

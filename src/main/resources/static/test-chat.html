@@ -253,6 +253,7 @@
         .stream-message {
             color: #333;
             margin: 4px 0;
+            white-space: pre-wrap;
         }
 
         /* 🔧 工具结果样式 */
@@ -466,6 +467,15 @@
             color: #409eff;
             background: #e6f7ff;
         }
+
+        .stream-error {
+            color: #ff4d4f;
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin: 8px 0;
+        }
     </style>
 </head>
 <body>
@@ -543,7 +553,7 @@
     <script>
         let token = localStorage.getItem('chat_token') || '';
         let currentMessageElement = null;
-        let currentMessageContent = ''; // 保存当前消息的完整HTML内容
+        let currentStreamState = null;
         let isStreaming = false;
         let currentConversationId = null; // 保存当前会话ID
 
@@ -622,6 +632,38 @@
             return contentDiv;
         }
 
+        function resetStreamState() {
+            currentStreamState = {
+                messageBuffer: '',
+                artifactBuffer: '',
+                messageBlock: null,
+                artifactBlock: null
+            };
+        }
+
+        function getOrCreatePersistentBlock(type) {
+            const key = `${type}Block`;
+            if (!currentStreamState[key]) {
+                const block = document.createElement('div');
+                block.className = `stream-${type}`;
+                currentMessageElement.appendChild(block);
+                currentStreamState[key] = block;
+            }
+            return currentStreamState[key];
+        }
+
+        function appendEphemeralBlock(type, content) {
+            const block = document.createElement('div');
+            block.className = `stream-${type}`;
+            block.textContent = content;
+            currentMessageElement.appendChild(block);
+        }
+
+        function scrollToBottom() {
+            const messagesContainer = document.getElementById('messages');
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
         // 更新状态
         function setStatus(text, streaming = false) {
             const status = document.getElementById('status');
@@ -641,7 +683,7 @@
             input.disabled = true;
             document.getElementById('sendBtn').disabled = true;
             isStreaming = true;
-            currentMessageContent = ''; // 重置当前消息内容
+            resetStreamState();
 
             // 显示用户消息
             appendMessage('user', content);
@@ -707,21 +749,16 @@
                                 // 处理不同状态的消息
                                 if (json.status === 'completed') {
                                     console.log('处理完成事件');
-                                    // 最后将累积的普通消息文本渲染为 Markdown
-                                    if (currentMessageContent) {
-                                        // 检查是否包含纯文本内容（没有被HTML标签包裹的）
-                                        const hasPlainText = /<div class="stream-/.test(currentMessageContent);
-
-                                        if (!hasPlainText && currentMessageContent.trim()) {
-                                            // 如果只有纯文本，渲染为 Markdown
-                                            currentMessageElement.innerHTML = marked.parse(currentMessageContent);
-                                        } else {
-                                            // 否则保持原样（已经包含了HTML结构）
-                                            currentMessageElement.innerHTML = currentMessageContent;
-                                        }
-
-                                        // 高亮代码块
-                                        currentMessageElement.querySelectorAll('pre code').forEach((block) => {
+                                    // 最后将累积的普通消息/报告渲染为 Markdown
+                                    if (currentStreamState.messageBlock && currentStreamState.messageBuffer.trim()) {
+                                        currentStreamState.messageBlock.innerHTML = marked.parse(currentStreamState.messageBuffer);
+                                        currentStreamState.messageBlock.querySelectorAll('pre code').forEach((block) => {
+                                            hljs.highlightElement(block);
+                                        });
+                                    }
+                                    if (currentStreamState.artifactBlock && currentStreamState.artifactBuffer.trim()) {
+                                        currentStreamState.artifactBlock.innerHTML = marked.parse(currentStreamState.artifactBuffer);
+                                        currentStreamState.artifactBlock.querySelectorAll('pre code').forEach((block) => {
                                             hljs.highlightElement(block);
                                         });
                                     }
@@ -738,54 +775,40 @@
                                     break;
                                 } else if (json.status === 'error') {
                                     console.log('处理错误事件');
-                                    currentMessageElement.innerHTML = `<div class="stream-error" style="color: #ff4d4f;">错误: ${json.content}</div>`;
+                                    const errorBlock = document.createElement('div');
+                                    errorBlock.className = 'stream-error';
+                                    errorBlock.textContent = `错误: ${json.content || ''}`;
+                                    currentMessageElement.appendChild(errorBlock);
                                     setStatus('错误');
                                     isStreaming = false;
                                     input.disabled = false;
                                     document.getElementById('sendBtn').disabled = false;
                                     break;
                                 } else if (['thinking', 'message', 'artifact', 'tool_result'].includes(json.status)) {
-                                    // 像打印机一样，将所有内容追加到同一个容器中
                                     if (json.content) {
                                         console.log('追加内容:', json.content, 'status:', json.status);
                                         receivedChunks++;
 
-                                        let contentHtml = '';
-
                                         if (json.status === 'thinking') {
-                                            // 💭 思考内容
-                                            contentHtml = `<div class="stream-thinking">${escapeHtml(json.content)}</div>`;
+                                            // 💭 思考内容（独立块）
+                                            appendEphemeralBlock('thinking', json.content);
                                         } else if (json.status === 'tool_result') {
-                                            // 🔧 工具结果
-                                            contentHtml = `<div class="stream-tool-result">${escapeHtml(json.content)}</div>`;
+                                            // 🔧 工具结果（独立块）
+                                            appendEphemeralBlock('tool-result', json.content);
                                         } else if (json.status === 'artifact') {
-                                            // 📄 报告内容 - 渲染 Markdown
-                                            const renderedMarkdown = marked.parse(json.content);
-                                            contentHtml = `<div class="stream-artifact">${renderedMarkdown}</div>`;
+                                            // 📄 报告内容 - 只在final_result中标记为artifact
+                                            currentStreamState.artifactBuffer += json.content;
+                                            const artifactBlock = getOrCreatePersistentBlock('artifact');
+                                            artifactBlock.innerHTML = marked.parse(currentStreamState.artifactBuffer);
                                         } else {
-                                            // 💬 普通消息 - 累积文本
-                                            currentMessageContent += escapeHtml(json.content);
-                                            // 实时显示纯文本
-                                            currentMessageElement.innerHTML = currentMessageContent;
-                                            // 滚动到底部
-                                            const messagesContainer = document.getElementById('messages');
-                                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                                            // 继续处理下一个
-                                            continue;
+                                            // 💬 普通消息 - 累积文本，实时显示纯文本
+                                            currentStreamState.messageBuffer += json.content;
+                                            const messageBlock = getOrCreatePersistentBlock('message');
+                                            messageBlock.textContent = currentStreamState.messageBuffer;
                                         }
 
-                                        // 将内容追加到容器中
-                                        currentMessageContent += contentHtml;
-                                        currentMessageElement.innerHTML = currentMessageContent;
-
-                                        // 高亮代码块
-                                        currentMessageElement.querySelectorAll('pre code').forEach((block) => {
-                                            hljs.highlightElement(block);
-                                        });
-
                                         // 滚动到底部
-                                        const messagesContainer = document.getElementById('messages');
-                                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                                        scrollToBottom();
                                     } else {
                                         console.log('content 为空，跳过');
                                     }
