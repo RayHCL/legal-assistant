@@ -22,14 +22,14 @@ public class ChatRequest {
     @Schema(description = "深度思考模式开关", example = "false")
     private Boolean deepThinking;
     
-    @Schema(description = "模型类型：DEEPSEEK_CHAT（对话模型）或 DEEPSEEK_REASONER（推理模型）", example = "DEEPSEEK_CHAT", required = true)
+    @Schema(description = "模型类型", example = "DASHSCOPE_QWEN_MAX", requiredMode = Schema.RequiredMode.REQUIRED, implementation = ModelType.class)
     @NotNull(message = "模型类型不能为空")
     private ModelType modelType;
     
     @Schema(description = "温度参数，范围0.0-2.0，默认0.7。值越大回答越有创造性", example = "0.7")
     private Double temperature;
     
-    @Schema(description = "Agent类型：LEGAL_CONSULTATION（法律咨询）、RISK_ASSESSMENT（风险评估）、DISPUTE_FOCUS（争议焦点）、CASE_ANALYSIS（案件分析）", example = "LEGAL_CONSULTATION", required = true)
+    @Schema(description = "Agent类型", example = "LEGAL_CONSULTATION", requiredMode = Schema.RequiredMode.REQUIRED, implementation = AgentType.class)
     @NotNull(message = "Agent类型不能为空")
     private AgentType agentType;
     

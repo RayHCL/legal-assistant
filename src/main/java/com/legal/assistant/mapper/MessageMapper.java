@@ -18,6 +18,6 @@ public interface MessageMapper extends BaseMapper<Message> {
     @Select("SELECT * FROM message WHERE conversation_id = #{conversationId} ORDER BY created_at ASC")
     List<Message> selectByConversationId(Long conversationId);
 
-    @Update("UPDATE message SET status = #{status} WHERE task_id = #{taskId}")
-    void updateStatusByTaskId(@Param("taskId") String taskId, @Param("status") String status);
+    @Update("UPDATE message SET answer = #{answer}, status = #{status}, updated_at = NOW() WHERE id = #{id}")
+    void updateAnswerAndStatus(@Param("id") Long id, @Param("answer") String answer, @Param("status") String status);
 }

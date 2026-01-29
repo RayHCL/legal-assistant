@@ -1,9 +1,8 @@
 package com.legal.assistant.agents.tools;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.legal.assistant.agents.context.AgentContext;
-import com.legal.assistant.entity.RiskReport;
-import com.legal.assistant.mapper.RiskReportMapper;
+import com.legal.assistant.entity.Report;
+import com.legal.assistant.mapper.ReportMapper;
 import com.legal.assistant.service.FileService;
 import com.legal.assistant.utils.PdfUtil;
 import io.agentscope.core.tool.Tool;
@@ -18,7 +17,6 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 /**
  * 报告保存工具
@@ -28,12 +26,12 @@ import java.time.format.DateTimeFormatter;
 public class ReportSaveToolService {
 
     @Autowired
-    private RiskReportMapper riskReportMapper;
+    private ReportMapper reportMapper;
 
     @Autowired
     private FileService fileService;
 
-    
+
     @Tool(name = "generate_download_link", description = "生成报告下载链接")
     public String generateDownloadLink(
             @ToolParam(name = "reportId", description = "报告编号") String reportId) {
@@ -41,8 +39,8 @@ public class ReportSaveToolService {
             return "错误: 报告编号为空";
         }
 
-        RiskReport report = riskReportMapper.selectOne(
-                new QueryWrapper<RiskReport>()
+        Report report = reportMapper.selectOne(
+                new QueryWrapper<Report>()
                         .eq("report_id", reportId));
         if (report == null) {
             return "错误: 报告不存在，reportId=" + reportId;
@@ -56,24 +54,23 @@ public class ReportSaveToolService {
         try {
             byte[] pdfBytes = convertMarkdownToPdf(reportContent);
             String filename = "风险评估报告_" + reportId + ".pdf";
+            // 上传到MinIO，获取对象路径
             String minioPath = fileService.uploadPdfToMinio(pdfBytes, filename);
 
+            // 更新报告记录
             report.setMinioPath(minioPath);
             report.setLinkExpireTime(LocalDateTime.now().plusDays(7));
             report.setUpdatedAt(LocalDateTime.now());
-            riskReportMapper.updateById(report);
+            reportMapper.updateById(report);
 
-            log.info("生成报告PDF并上传: reportId={}, minioPath={}", reportId, minioPath);
-            return minioPath;
+            // 构建后端服务的下载URL
+            String downloadUrl = fileService.buildDownloadUrl(minioPath);
+            log.info("生成报告PDF并上传: reportId={}, minioPath={}, downloadUrl={}", reportId, minioPath, downloadUrl);
+            return downloadUrl;
         } catch (Exception e) {
             log.error("生成报告PDF失败: reportId={}", reportId, e);
             return "错误: 生成PDF失败 - " + e.getMessage();
         }
-    }
-
-    private String generateReportId() {
-        String timestamp = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS").format(LocalDateTime.now());
-        return "RPT" + timestamp;
     }
 
     private byte[] convertMarkdownToPdf(String markdownContent) throws Exception {

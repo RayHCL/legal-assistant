@@ -7,14 +7,15 @@ import lombok.Data;
 @Data
 @Schema(description = "更新用户信息请求")
 public class UpdateUserRequest {
-    @Schema(description = "昵称（2-20个字符）", example = "张三")
-    @Size(min = 2, max = 20, message = "昵称长度必须在2-20个字符之间")
-    private String nickname;
+    @Schema(description = "昵称", example = "新昵称")
+    @Size(max = 50, message = "昵称不能超过50个字符")
+    private String nickName;
     
-    @Schema(description = "头像URL", example = "http://example.com/avatar.jpg")
-    private String avatar;
-    
-    @Schema(description = "个人简介（最多500个字符）", example = "我是一名法律工作者")
+    @Schema(description = "个人简介", example = "这是我的新简介")
     @Size(max = 500, message = "个人简介不能超过500个字符")
     private String bio;
+    
+    @Schema(description = "头像URL", example = "https://example.com/new-avatar.jpg")
+    @Size(max = 500, message = "头像URL不能超过500个字符")
+    private String avatarUrl;
 }

@@ -68,6 +68,8 @@ sms:
   send-limit-per-minute: 1  # 每分钟发送限制
   send-limit-per-day: 10  # 每天发送限制
 
+
+
 # 业务配置
 business:
   share:
@@ -122,14 +124,8 @@ agent:
     token-ratio: 0.3
   # 会话配置
   session:
-    # 会话文件存储路径
-    base-path: ./sessions
-  # 法律咨询 Agent 配置
-  legal-consultation:
-    max-iterations: 5
-  # 风险评估 Agent 配置
-  risk-assessment:
-    max-iterations: 10
+    expire-days: 7  # 会话记忆过期时间（天）
+
 
 # 服务器配置
 server:

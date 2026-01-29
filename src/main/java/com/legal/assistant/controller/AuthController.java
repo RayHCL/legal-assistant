@@ -3,6 +3,7 @@ package com.legal.assistant.controller;
 import com.legal.assistant.annotation.NoAuth;
 import com.legal.assistant.common.Result;
 import com.legal.assistant.dto.request.LoginRequest;
+import com.legal.assistant.dto.request.RefreshTokenRequest;
 import com.legal.assistant.dto.request.SendCodeRequest;
 import com.legal.assistant.dto.response.LoginResponse;
 import com.legal.assistant.service.AuthService;
@@ -25,10 +26,10 @@ public class AuthController {
     
     @NoAuth
     @PostMapping("/send-code")
-    @Operation(summary = "发送验证码", description = "向指定手机号发送6位数字验证码，验证码有效期5分钟。开发环境下验证码会打印在控制台。")
-    public Result<Void> sendCode(@Valid @RequestBody SendCodeRequest request) {
+    @Operation(summary = "发送验证码", description = "向指定手机号发送6位数字验证码，验证码有效期5分钟。")
+    public Result<String> sendCode(@Valid @RequestBody SendCodeRequest request) {
         authService.sendCode(request.getPhoneNumber());
-        return Result.success();
+        return Result.success("验证码发送成功");
     }
     
     @NoAuth
@@ -41,20 +42,22 @@ public class AuthController {
     }
     
     @PostMapping("/logout")
-    @Operation(summary = "退出登录", description = "退出登录，将当前Token加入黑名单，使其失效。需要Token认证。")
-    public Result<Void> logout(HttpServletRequest request) {
+    @Operation(summary = "用户登出", description = "用户登出，使当前token失效。")
+    public Result<String> logout(HttpServletRequest request) {
         String token = getTokenFromRequest(request);
         authService.logout(token);
-        return Result.success();
+        return Result.success("登出成功");
     }
     
+    @NoAuth
     @PostMapping("/refresh")
-    @Operation(summary = "刷新Token", description = "使用刷新Token获取新的访问Token和刷新Token。需要Token认证。")
-    public Result<LoginResponse> refreshToken(@RequestHeader("Authorization") String bearerToken) {
-        String token = bearerToken.substring(7);
-        LoginResponse response = authService.refreshToken(token);
+    @Operation(summary = "刷新Token", description = "使用刷新令牌获取新的访问令牌。")
+    public Result<LoginResponse> refreshToken(@Valid @RequestBody RefreshTokenRequest request) {
+        LoginResponse response = authService.refreshToken(request.getRefreshToken());
         return Result.success(response);
     }
+    
+
     
     private String getClientIp(HttpServletRequest request) {
         String ip = request.getHeader("X-Forwarded-For");

@@ -6,6 +6,7 @@ import com.legal.assistant.enums.FileType;
 import com.legal.assistant.mapper.DocumentFileMapper;
 import com.legal.assistant.utils.DocumentExtractor;
 import com.legal.assistant.utils.FileUtils;
+import com.legal.assistant.utils.TimeUtils;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +38,13 @@ public class FileService {
 
     @Value("${minio.bucket-name}")
     private String bucketName;
+
+    @Value("${minio.endpoint}")
+    private String minioEndpoint;
+
+    @Value("${server.base-url:http://localhost:8080}")
+    private String serverBaseUrl;
+
     @Autowired
     private  MinioClient minioClient;
     @Autowired
@@ -90,9 +99,11 @@ public class FileService {
         response.setFileType(documentFile.getFileType());
         response.setFileSize(documentFile.getFileSize());
         response.setStatus(documentFile.getStatus());
-        response.setUploadTime(documentFile.getCreatedAt());
+        response.setUploadTime(TimeUtils.toTimestamp(documentFile.getCreatedAt()));
         response.setExtractedText(extractedText.length() > 500 ?
                 extractedText.substring(0, 500) : extractedText);
+        // 构建文件下载URL
+        response.setFileUrl(buildDownloadUrl(minioPath));
 
         return response;
     }
@@ -228,6 +239,39 @@ public class FileService {
             log.error("上传PDF到MinIO失败: {}", filename, e);
             throw new RuntimeException("上传PDF失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 构建后端服务的文件下载URL
+     * @param minioPath MinIO对象路径
+     * @return 后端服务的下载URL
+     */
+    public String buildDownloadUrl(String minioPath) {
+        // 移除末尾的斜杠（如果有）
+        String baseUrl = serverBaseUrl.endsWith("/")
+                ? serverBaseUrl.substring(0, serverBaseUrl.length() - 1)
+                : serverBaseUrl;
+        // 对路径进行URL编码
+        try {
+            String encodedPath = URLEncoder.encode(minioPath,StandardCharsets.UTF_8);
+            return baseUrl + "/api/file/download?path=" + encodedPath;
+        } catch (Exception e) {
+            log.error("构建下载URL失败: {}", minioPath, e);
+            return baseUrl + "/api/file/download?path=" + minioPath;
+        }
+    }
+
+    /**
+     * 构建MinIO直接访问的HTTP URL（内部使用）
+     * @param objectName 对象名称
+     * @return MinIO的HTTP URL
+     */
+    public String buildMinioDirectUrl(String objectName) {
+        // 移除endpoint末尾的斜杠（如果有）
+        String baseUrl = minioEndpoint.endsWith("/") 
+                ? minioEndpoint.substring(0, minioEndpoint.length() - 1) 
+                : minioEndpoint;
+        return baseUrl + "/" + bucketName + "/" + objectName;
     }
 
     /**

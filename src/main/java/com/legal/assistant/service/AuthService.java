@@ -128,18 +128,23 @@ public class AuthService {
         user.setLastLoginIp(clientIp);
         userMapper.updateById(user);
         
+        // 清除「需重新登录」标记（如修改手机号后已用新手机号登录）
+        redisTemplate.delete("user:relogin:" + user.getId());
+        
         // 生成Token
         String token = jwtUtils.generateToken(user.getId(), user.getPhone());
         String refreshToken = jwtUtils.generateRefreshToken(user.getId(), user.getPhone());
         
         // 构建响应
         LoginResponse response = new LoginResponse();
-        response.setToken(token);
+        response.setAccessToken(token);
         response.setRefreshToken(refreshToken);
-        response.setUserId(user.getId());
+        response.setExpiresIn(3600L);  // 1小时
+        response.setUserId(user.getId().intValue());
+        response.setUsername(user.getNickname());
+
+        response.setAvatarUrl(user.getAvatar());
         response.setNickname(user.getNickname());
-        response.setAvatar(user.getAvatar());
-        response.setExpiresIn(604800L);  // 7天
         
         log.info("用户登录: userId={}, phone={}, isNewUser={}", user.getId(), user.getPhone(), isNewUser);
         
@@ -154,9 +159,11 @@ public class AuthService {
         try {
             Long userId = jwtUtils.getUserIdFromToken(token);
             redisTemplate.opsForValue().set("token:blacklist:" + token, "1", 7, TimeUnit.DAYS);
-            log.info("用户退出登录: userId={}", userId);
+            log.info("用户退出登录: userId={}, token已加入黑名单", userId);
         } catch (Exception e) {
             log.error("退出登录失败", e);
+            // 即使解析失败，也将token加入黑名单
+            redisTemplate.opsForValue().set("token:blacklist:" + token, "1", 7, TimeUnit.DAYS);
         }
     }
     
@@ -168,12 +175,34 @@ public class AuthService {
             throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "刷新Token无效");
         }
         
+        // 检查refreshToken是否在黑名单中
+        if (Boolean.TRUE.equals(redisTemplate.hasKey("token:blacklist:" + refreshToken))) {
+            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "刷新Token已失效");
+        }
+        
         Claims claims = jwtUtils.getClaimsFromToken(refreshToken);
         if (!"refresh".equals(claims.get("type"))) {
             throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "Token类型错误");
         }
         
         Long userId = Long.valueOf(claims.get("userId").toString());
+        
+        // 检查用户是否已被删除（注销）
+        if (Boolean.TRUE.equals(redisTemplate.hasKey("user:deleted:" + userId))) {
+            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "用户账户已注销，Token已失效");
+        }
+        
+        // 检查是否因修改手机号需重新登录
+        if (Boolean.TRUE.equals(redisTemplate.hasKey("user:relogin:" + userId))) {
+            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "手机号已更换，请使用新手机号重新登录");
+        }
+        
+        // 获取用户信息并检查是否被删除
+        User user = userMapper.selectById(userId);
+        if (user == null || Boolean.TRUE.equals(user.getIsDeleted())) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND.getCode(), ErrorCode.USER_NOT_FOUND.getMessage());
+        }
+        
         String phone = claims.get("phone").toString();
         
         // 生成新的Token
@@ -181,11 +210,47 @@ public class AuthService {
         String newRefreshToken = jwtUtils.generateRefreshToken(userId, phone);
         
         LoginResponse response = new LoginResponse();
-        response.setToken(newToken);
+        response.setAccessToken(newToken);
         response.setRefreshToken(newRefreshToken);
-        response.setUserId(userId);
-        response.setExpiresIn(604800L);
+        response.setExpiresIn(3600L);
+        response.setUserId(userId.intValue());
+        response.setUsername(user.getNickname());
+        response.setAvatarUrl(user.getAvatar());
+        response.setNickname(user.getNickname());
         
         return response;
+    }
+    
+    /**
+     * 注销账户（简单版本，建议使用UserService.deactivateAccount）
+     * @deprecated 请使用 UserService.deactivateAccount 方法，该方法会完整删除所有相关数据
+     */
+    @Deprecated
+    @Transactional
+    public void deleteAccount(Long userId, String token) {
+        User user = userMapper.selectById(userId);
+        if (user == null || Boolean.TRUE.equals(user.getIsDeleted())) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND.getCode(), ErrorCode.USER_NOT_FOUND.getMessage());
+        }
+        
+        // 将当前token加入黑名单
+        if (token != null && !token.isEmpty()) {
+            try {
+                redisTemplate.opsForValue().set("token:blacklist:" + token, "1", 7, TimeUnit.DAYS);
+                log.info("注销账户时将token加入黑名单: userId={}", userId);
+            } catch (Exception e) {
+                log.warn("注销账户时加入token黑名单失败: userId={}", userId, e);
+            }
+        }
+        
+        // 标记用户的所有token失效
+        redisTemplate.opsForValue().set("user:deleted:" + userId, "1", 30, TimeUnit.DAYS);
+        
+        // 软删除用户
+        user.setIsDeleted(true);
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        
+        log.info("用户注销账户: userId={}, phone={}", userId, user.getPhone());
     }
 }

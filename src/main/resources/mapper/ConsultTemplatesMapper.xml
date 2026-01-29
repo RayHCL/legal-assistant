@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.legal.assistant.mapper.ConsultTemplatesMapper">
+
+    <!-- 随机查询指定数量的启用状态的咨询模版 -->
+    <select id="selectRandomTemplates" resultType="com.legal.assistant.entity.ConsultTemplates">
+        SELECT
+            id,
+            question,
+            agent_type AS agentType,
+            category,
+            status,
+            sort_order AS sortOrder,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+        FROM consult_templates
+        WHERE status = 1
+        <if test="agentType != null">
+            AND agent_type = #{agentType}
+        </if>
+        ORDER BY RAND()
+        LIMIT #{limit}
+
+    </select>
+
+</mapper>

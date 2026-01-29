@@ -23,11 +23,11 @@ public class ChatCompletionRequest {
     @Schema(description = "文件ID列表", example = "[1, 2, 3]")
     private List<Long> fileIds;
 
-    @Schema(description = "模型类型", required = true, example = "DASHSCOPE_QWEN_MAX")
+    @Schema(description = "模型类型", requiredMode = Schema.RequiredMode.REQUIRED, example = "DASHSCOPE_QWEN_MAX", implementation = ModelType.class)
     @NotNull(message = "模型类型不能为空")
     private ModelType modelType;
 
-    @Schema(description = "Agent类型", required = true, example = "LEGAL_CONSULTATION")
+    @Schema(description = "Agent类型", requiredMode = Schema.RequiredMode.REQUIRED, example = "LEGAL_CONSULTATION", implementation = AgentType.class)
     @NotNull(message = "Agent类型不能为空")
     private AgentType agentType;
 

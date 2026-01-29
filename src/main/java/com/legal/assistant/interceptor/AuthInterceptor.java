@@ -53,19 +53,32 @@ public class AuthInterceptor implements HandlerInterceptor {
             throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), ErrorCode.TOKEN_INVALID.getMessage());
         }
         
-        // 检查Token是否在黑名单中(如用户注销)
+        // 检查Token是否在黑名单中(如用户登出或注销)
         if (Boolean.TRUE.equals(redisTemplate.hasKey("token:blacklist:" + token))) {
-            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), ErrorCode.TOKEN_INVALID.getMessage());
+            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "Token已失效");
         }
         
         // 将用户ID存储到request中,供后续使用
+        Long userId;
         try {
-            Long userId = jwtUtils.getUserIdFromToken(token);
-            request.setAttribute("userId", userId);
+            userId = jwtUtils.getUserIdFromToken(token);
         } catch (Exception e) {
             log.error("解析Token失败", e);
             throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), ErrorCode.TOKEN_INVALID.getMessage());
         }
+        
+        // 检查用户是否已被删除（注销）
+        if (Boolean.TRUE.equals(redisTemplate.hasKey("user:deleted:" + userId))) {
+            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "用户账户已注销，Token已失效");
+        }
+        
+        // 检查是否因修改手机号需重新登录
+        if (Boolean.TRUE.equals(redisTemplate.hasKey("user:relogin:" + userId))) {
+            throw new BusinessException(ErrorCode.TOKEN_INVALID.getCode(), "手机号已更换，请使用新手机号重新登录");
+        }
+        
+        // 将userId存储到request中
+        request.setAttribute("userId", userId);
         
         return true;
     }

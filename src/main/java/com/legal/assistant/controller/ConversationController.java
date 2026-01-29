@@ -1,8 +1,8 @@
 package com.legal.assistant.controller;
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.legal.assistant.common.Result;
 import com.legal.assistant.dto.request.ConversationRequest;
+import com.legal.assistant.dto.response.ConversationListResponse;
 import com.legal.assistant.dto.response.ConversationResponse;
 import com.legal.assistant.entity.Message;
 import com.legal.assistant.service.ConversationService;
@@ -26,40 +26,23 @@ public class ConversationController {
     @Autowired
     private ConversationService conversationService;
     
-    @PostMapping("/create")
-    @Operation(summary = "创建会话", description = "创建一个新的会话，可以指定标题、Agent类型和模型类型。需要Token认证。")
-    public Result<ConversationResponse> createConversation(@Valid @RequestBody ConversationRequest request,
-                                                           HttpServletRequest httpRequest) {
-        Long userId = (Long) httpRequest.getAttribute("userId");
-        ConversationResponse response = conversationService.createConversation(userId, request);
-        return Result.success(response);
-    }
+
     
     @GetMapping("/list")
-    @Operation(summary = "获取会话列表", description = "分页获取当前用户的所有会话列表，按置顶状态和时间排序。需要Token认证。")
-    public Result<Page<ConversationResponse>> getConversationList(
-            @Parameter(description = "页码，从1开始", example = "1")
-            @RequestParam(defaultValue = "1") Integer page,
+    @Operation(summary = "获取会话列表", description = "获取当前用户的会话列表，分为置顶、今天、历史三个分类。支持游标分页。需要Token认证。")
+    public Result<ConversationListResponse> getConversationList(
             @Parameter(description = "每页数量", example = "20")
             @RequestParam(defaultValue = "20") Integer size,
+            @Parameter(description = "上一页最后一条记录的ID（用于分页）", example = "100")
+            @RequestParam(required = false) String lastId,
             HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        Page<ConversationResponse> response = conversationService.getConversationList(userId, page, size);
+        ConversationListResponse response = conversationService.getConversationList(userId, size, lastId);
         return Result.success(response);
     }
     
-    @GetMapping("/{conversationId}")
-    @Operation(summary = "获取会话详情", description = "获取指定会话的详细信息，包括标题、Agent类型、模型类型、消息数量等。需要Token认证。")
-    public Result<ConversationResponse> getConversation(
-            @Parameter(description = "会话ID", required = true, example = "1")
-            @PathVariable Long conversationId,
-            HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        ConversationResponse response = conversationService.getConversation(userId, conversationId);
-        return Result.success(response);
-    }
-    
-    @PutMapping("/{conversationId}/rename")
+
+    @PostMapping("/{conversationId}/rename")
     @Operation(summary = "重命名会话", description = "修改会话的标题。需要Token认证。")
     public Result<Void> renameConversation(
             @Parameter(description = "会话ID", required = true, example = "1")
@@ -72,7 +55,7 @@ public class ConversationController {
         return Result.success();
     }
     
-    @PutMapping("/{conversationId}/pin")
+    @PostMapping("/{conversationId}/pin")
     @Operation(summary = "置顶/取消置顶会话", description = "将会话置顶或取消置顶。置顶的会话会在列表中优先显示。需要Token认证。")
     public Result<Void> pinConversation(
             @Parameter(description = "会话ID", required = true, example = "1")
@@ -85,7 +68,7 @@ public class ConversationController {
         return Result.success();
     }
     
-    @DeleteMapping("/{conversationId}")
+    @GetMapping("/{conversationId}")
     @Operation(summary = "删除会话", description = "删除指定的会话（软删除），会话数据会保留30天。删除会话的同时会删除关联的所有消息。需要Token认证。")
     public Result<Void> deleteConversation(
             @Parameter(description = "会话ID", required = true, example = "1")

@@ -1,26 +1,26 @@
 package com.legal.assistant.service;
 
-import com.legal.assistant.dto.response.ConversationResponse;
-import com.legal.assistant.entity.Conversation;
+import com.legal.assistant.dto.response.ShareDetailResponse;
+import com.legal.assistant.dto.response.ShareResponse;
 import com.legal.assistant.entity.Message;
 import com.legal.assistant.entity.Share;
+import com.legal.assistant.entity.User;
 import com.legal.assistant.exception.BusinessException;
 import com.legal.assistant.exception.ErrorCode;
-import com.legal.assistant.mapper.ConversationMapper;
 import com.legal.assistant.mapper.MessageMapper;
 import com.legal.assistant.mapper.ShareMapper;
+import com.legal.assistant.mapper.UserMapper;
+import com.legal.assistant.utils.TimeUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.DigestUtils;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -30,98 +30,86 @@ public class ShareService {
     private ShareMapper shareMapper;
     
     @Autowired
-    private ConversationMapper conversationMapper;
-    
-    @Autowired
     private MessageMapper messageMapper;
     
-    @Value("${business.share.default-expiration-days:7}")
-    private Integer defaultExpirationDays;
+    @Autowired
+    private UserMapper userMapper;
     
     /**
      * 创建分享
      */
     @Transactional
-    public Map<String, Object> createShare(Long userId, Long conversationId, Integer expirationDays, String password) {
-        Conversation conversation = conversationMapper.selectById(conversationId);
-        if (conversation == null || Boolean.TRUE.equals(conversation.getIsDeleted())) {
-            throw new BusinessException(ErrorCode.CONVERSATION_NOT_FOUND.getCode(), 
-                ErrorCode.CONVERSATION_NOT_FOUND.getMessage());
-        }
-        
-        if (!conversation.getUserId().equals(userId)) {
-            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权限分享该会话");
+    public ShareResponse createShare(Long userId, List<Long> messageIds) {
+        if (messageIds == null || messageIds.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "消息ID列表不能为空");
         }
         
         // 生成分享ID
-        String shareId = UUID.randomUUID().toString().replace("-", "");
+        String shareId = "share_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         
-        // 计算过期时间
-        int days = expirationDays != null ? expirationDays : defaultExpirationDays;
-        LocalDateTime expirationTime = LocalDateTime.now().plusDays(days);
-        
-        // 处理密码
-        String passwordHash = null;
-        if (password != null && !password.isEmpty()) {
-            passwordHash = DigestUtils.md5DigestAsHex(password.getBytes());
-        }
+        // 将消息ID列表转换为逗号分隔的字符串存储
+        String messageIdsStr = messageIds.stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(","));
         
         Share share = new Share();
-        share.setConversationId(conversationId);
         share.setShareId(shareId);
-        share.setPasswordHash(passwordHash);
-        share.setExpirationTime(expirationTime);
+        share.setUserId(userId);
+        share.setMessageIds(messageIdsStr);
         share.setViewCount(0);
         share.setCreatedAt(LocalDateTime.now());
         shareMapper.insert(share);
         
-        Map<String, Object> result = new HashMap<>();
-        result.put("shareId", shareId);
-        result.put("shareUrl", "/api/share/" + shareId);
-        result.put("expirationTime", expirationTime);
-        result.put("hasPassword", passwordHash != null);
+        ShareResponse response = new ShareResponse();
+        response.setShareId(shareId);
         
-        log.info("创建分享: userId={}, conversationId={}, shareId={}", userId, conversationId, shareId);
-        return result;
+        log.info("创建分享: userId={}, shareId={}, messageIds={}", userId, shareId, messageIds);
+        return response;
     }
     
     /**
-     * 访问分享（验证密码）
+     * 获取分享详情
      */
-    public Map<String, Object> accessShare(String shareId, String password) {
+    public ShareDetailResponse getShareDetail(String shareId) {
         Share share = shareMapper.selectByShareId(shareId);
         if (share == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "分享不存在");
-        }
-        
-        // 检查是否过期
-        if (share.getExpirationTime().isBefore(LocalDateTime.now())) {
-            throw new BusinessException(400, "分享已过期");
-        }
-        
-        // 验证密码
-        if (share.getPasswordHash() != null) {
-            if (password == null || password.isEmpty()) {
-                throw new BusinessException(400, "需要密码");
-            }
-            String inputHash = DigestUtils.md5DigestAsHex(password.getBytes());
-            if (!share.getPasswordHash().equals(inputHash)) {
-                throw new BusinessException(400, "密码错误");
-            }
         }
         
         // 增加查看次数
         share.setViewCount(share.getViewCount() + 1);
         shareMapper.updateById(share);
         
-        // 获取会话和消息
-        Conversation conversation = conversationMapper.selectById(share.getConversationId());
-        List<Message> messages = messageMapper.selectByConversationId(share.getConversationId());
+        // 获取分享人信息
+        User user = userMapper.selectById(share.getUserId());
+        String createdBy = user != null ? "user_" + user.getId() : "unknown";
         
-        Map<String, Object> result = new HashMap<>();
-        result.put("conversation", conversation);
-        result.put("messages", messages);
+        // 解析消息ID列表并获取消息
+        List<String> messageIdList = List.of(share.getMessageIds().split(","));
+        List<ShareDetailResponse.MessageDTO> messageDTOs = new ArrayList<>();
         
-        return result;
+        for (String messageIdStr : messageIdList) {
+            try {
+                Long msgId = Long.parseLong(messageIdStr.trim());
+                Message message = messageMapper.selectById(msgId);
+                if (message != null) {
+                    ShareDetailResponse.MessageDTO dto = new ShareDetailResponse.MessageDTO();
+                    dto.setId(msgId);
+                    dto.setQuery(message.getQuery());
+                    dto.setAnswer(message.getAnswer());
+                    messageDTOs.add(dto);
+                }
+            } catch (NumberFormatException e) {
+                log.warn("无法解析消息ID: {}", messageIdStr);
+            }
+        }
+        
+        ShareDetailResponse response = new ShareDetailResponse();
+        response.setShareId(shareId);
+        response.setCreatedBy(createdBy);
+        response.setCreatedAt(TimeUtils.toTimestamp(share.getCreatedAt()));
+        response.setMessages(messageDTOs);
+        
+        return response;
     }
 }

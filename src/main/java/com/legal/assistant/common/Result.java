@@ -10,7 +10,7 @@ public class Result<T> {
 
     public static <T> Result<T> success(T data) {
         Result<T> result = new Result<>();
-        result.setCode(200);
+        result.setCode(1000);
         result.setMessage("操作成功");
         result.setData(data);
         return result;

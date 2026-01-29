@@ -14,7 +14,12 @@ import java.util.List;
 public class AgentContext {
     private  Long userId;
     private  Long conversationId;
+    private Long messageId;
     private  List<Long> fileIds;
+    /**
+     * 最近生成的报告ID，用于下一轮对话中生成PDF下载链接
+     */
+    private String lastReportId;
 
     public AgentContext(Long userId, Long conversationId) {
         this.userId = userId;

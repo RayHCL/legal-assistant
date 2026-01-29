@@ -2,7 +2,6 @@ package com.legal.assistant.dto.response;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
-import java.time.LocalDateTime;
 
 @Data
 @Schema(description = "会话响应")
@@ -25,11 +24,11 @@ public class ConversationResponse {
     @Schema(description = "是否置顶", example = "false")
     private Boolean isPinned;
     
-    @Schema(description = "创建时间", example = "2024-01-01T10:00:00")
-    private LocalDateTime createdAt;
+    @Schema(description = "创建时间（时间戳，毫秒）", example = "1704067200000")
+    private Long createdAt;
     
-    @Schema(description = "更新时间", example = "2024-01-17T17:00:00")
-    private LocalDateTime updatedAt;
+    @Schema(description = "更新时间（时间戳，毫秒）", example = "1705507200000")
+    private Long updatedAt;
     
     @Schema(description = "消息数量", example = "10")
     private Integer messageCount;

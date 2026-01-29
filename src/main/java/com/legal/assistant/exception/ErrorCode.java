@@ -4,12 +4,10 @@ import lombok.Getter;
 
 @Getter
 public enum ErrorCode {
-    SUCCESS(200, "操作成功"),
-    BAD_REQUEST(400, "请求参数错误"),
-    UNAUTHORIZED(401, "未授权，请先登录"),
-    FORBIDDEN(403, "无权限访问"),
-    NOT_FOUND(404, "资源不存在"),
-    INTERNAL_ERROR(500, "服务器内部错误"),
+    SUCCESS(1000, "操作成功"),
+    FORBIDDEN(9999, "无权限访问"),
+    NOT_FOUND(9998, "资源不存在"),
+    INTERNAL_ERROR(9997, "服务器内部错误"),
     
     // 用户相关
     USER_NOT_FOUND(1001, "用户不存在"),

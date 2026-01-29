@@ -36,6 +36,10 @@ public class DocumentFile {
 
     private String status;
 
+    @TableLogic
+    @TableField("is_deleted")
+    private Boolean isDeleted;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }
