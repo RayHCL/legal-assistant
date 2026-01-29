@@ -22,7 +22,7 @@ public class ChatRequest {
     @Schema(description = "深度思考模式开关", example = "false")
     private Boolean deepThinking;
     
-    @Schema(description = "模型类型", example = "DASHSCOPE_QWEN_MAX", requiredMode = Schema.RequiredMode.REQUIRED, implementation = ModelType.class)
+    @Schema(description = "模型类型", example = "QWEN_MAX", requiredMode = Schema.RequiredMode.REQUIRED, implementation = ModelType.class)
     @NotNull(message = "模型类型不能为空")
     private ModelType modelType;
     

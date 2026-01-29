@@ -506,10 +506,14 @@
             <div class="config-row">
                 <span class="config-label">Model:</span>
                 <select id="modelType" class="config-select">
-                    <option value="DASHSCOPE_QWEN_PLUS" selected>qwen-plus</option>
-                    <option value="DASHSCOPE_QWEN_TURBO">qwen-turbo</option>
-                    <option value="DASHSCOPE_QWEN_MAX">qwen-max</option>
+                    <option value="QWEN_MAX" selected>qwen-max</option>
+                    <option value="DEEPSEEK_CHAT">deepseek-chat</option>
+                    <option value="DEEPSEEK_R1">deepseek-r1</option>
                 </select>
+            </div>
+            <div class="config-row">
+                <span class="config-label">深度思考:</span>
+                <label><input type="checkbox" id="deepThinking" /> 启用（展示推理过程，如 DeepSeek R1）</label>
             </div>
         </div>
 
@@ -697,6 +701,7 @@
                 question: content,
                 agentType: document.getElementById('agentType').value,
                 modelType: document.getElementById('modelType').value,
+                deepThinking: document.getElementById('deepThinking').checked,
                 conversationId: currentConversationId, // 使用当前会话ID
                 autoGenerateTitle: true,
                 fileIds: [],

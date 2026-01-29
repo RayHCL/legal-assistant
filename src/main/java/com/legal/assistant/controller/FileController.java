@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
+import java.util.Map;
 
 /**
  * 文件管理控制器
@@ -86,6 +87,51 @@ public class FileController {
         }
     }
 
+    @GetMapping("/preview")
+    @Operation(summary = "预览文件", description = "根据MinIO路径或文件ID预览文件。浏览器内嵌展示（inline），支持 PDF、图片等。")
+    @NoAuth
+    public void previewFile(
+            @Parameter(description = "MinIO文件路径（与 fileId 二选一）", example = "risk-reports/xxx.pdf")
+            @RequestParam(value = "path", required = false) String minioPath,
+            @Parameter(description = "文件ID（上传接口返回的 fileId，与 path 二选一）", example = "1")
+            @RequestParam(value = "fileId", required = false) Long fileId,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        try {
+            String path = minioPath;
+            if (path == null || path.isEmpty()) {
+                if (fileId == null) {
+                    response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                    response.getWriter().write("请提供 path 或 fileId");
+                    return;
+                }
+                Long userId = request.getAttribute("userId") != null ? (Long) request.getAttribute("userId") : null;
+                path = fileService.getMinioPathByFileId(fileId, userId);
+                if (path == null) {
+                    response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                    response.getWriter().write("文件不存在或无权限");
+                    return;
+                }
+            }
+            byte[] fileBytes = fileService.downloadFromMinio(path);
+            String filename = extractFilename(path);
+            String contentType = getContentTypeForPreview(filename);
+            response.setContentType(contentType);
+            response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + URLEncoder.encode(filename, "UTF-8") + "\"");
+            response.setContentLength(fileBytes.length);
+            response.getOutputStream().write(fileBytes);
+            response.getOutputStream().flush();
+            log.info("文件预览成功: path={}", path);
+        } catch (Exception e) {
+            log.error("文件预览失败: path={}, fileId={}", minioPath, fileId, e);
+            try {
+                response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                response.getWriter().write("文件预览失败: " + e.getMessage());
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     /**
      * 从MinIO路径中提取文件名
      */
@@ -111,6 +157,37 @@ public class FileController {
             return filename;
         }
         return minioPath;
+    }
+
+    /**
+     * 根据文件名/路径返回预览用的 Content-Type（inline 展示）
+     */
+    private static final Map<String, String> PREVIEW_CONTENT_TYPES = Map.ofEntries(
+            Map.entry("pdf", "application/pdf"),
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("png", "image/png"),
+            Map.entry("gif", "image/gif"),
+            Map.entry("webp", "image/webp"),
+            Map.entry("bmp", "image/bmp"),
+            Map.entry("svg", "image/svg+xml"),
+            Map.entry("md", "text/markdown; charset=utf-8"),
+            Map.entry("txt", "text/plain; charset=utf-8")
+    );
+
+    private String getContentTypeForPreview(String filename) {
+        if (filename == null || filename.isEmpty()) {
+            return MediaType.APPLICATION_OCTET_STREAM_VALUE;
+        }
+        int dot = filename.lastIndexOf('.');
+        if (dot >= 0 && dot < filename.length() - 1) {
+            String ext = filename.substring(dot + 1).toLowerCase();
+            String type = PREVIEW_CONTENT_TYPES.get(ext);
+            if (type != null) {
+                return type;
+            }
+        }
+        return MediaType.APPLICATION_OCTET_STREAM_VALUE;
     }
 
 }

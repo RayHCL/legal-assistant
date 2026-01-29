@@ -1,9 +1,12 @@
 package com.legal.assistant.service;
 
+import cn.hutool.core.date.DateUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.legal.assistant.dto.request.ConversationRequest;
+import com.legal.assistant.dto.request.MessageFeedbackRequest;
 import com.legal.assistant.dto.response.ConversationListResponse;
 import com.legal.assistant.dto.response.ConversationResponse;
 import com.legal.assistant.entity.Conversation;
@@ -14,6 +17,7 @@ import com.legal.assistant.mapper.ConversationMapper;
 import com.legal.assistant.mapper.MessageMapper;
 import com.legal.assistant.utils.TimeUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.time.DateUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,7 +31,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -88,89 +91,93 @@ public class ConversationService {
     }
     
     /**
-     * 获取会话列表（分页）
+     * 获取会话列表：
+     * 1. 置顶的会话：全部返回，不分页
+     * 2. 今日的会话：全部返回，不分页
+     * 3. 历史会话：不包含置顶和今日的，按更新时间分页（page/size/total/totalPages）
+     *
+     * @param userId 用户ID
+     * @param page   历史会话页码，从 1 开始
+     * @param size   历史会话每页条数
      */
-    public ConversationListResponse getConversationList(Long userId, Integer size, String lastId) {
-        // 计算今天的开始和结束时间
-        LocalDate today = LocalDate.now();
-        LocalDateTime todayStart = today.atStartOfDay();
-        LocalDateTime todayEnd = today.atTime(LocalTime.MAX);
-        
-        // 查询所有未删除的会话
-        LambdaQueryWrapper<Conversation> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Conversation::getUserId, userId)
-               .eq(Conversation::getIsDeleted, false);
-        
-        // 如果有lastId，则查询ID小于lastId的记录（用于分页）
-        if (lastId != null && !lastId.isEmpty()) {
-            try {
-                Long lastIdLong = Long.parseLong(lastId);
-                wrapper.lt(Conversation::getId, lastIdLong);
-            } catch (NumberFormatException e) {
-                log.warn("无效的lastId: {}", lastId);
-            }
+    public ConversationListResponse getConversationList(Long userId, Integer page, Integer size) {
+        if (page == null || page < 1) {
+            page = 1;
         }
-        
-        // 按更新时间降序排序
-        wrapper.orderByDesc(Conversation::getUpdatedAt);
-        
-        // 查询size+1条，用于判断是否有下一页
-        wrapper.last("LIMIT " + (size + 1));
-        List<Conversation> allConversations = conversationMapper.selectList(wrapper);
-        
-        // 判断是否有下一页
-        boolean hasMore = allConversations.size() > size;
-        
-        // 如果有多余的记录，只取前size条
-        if (hasMore) {
-            allConversations = allConversations.subList(0, size);
+        if (size == null || size < 1) {
+            size = 20;
         }
-        
-        // 分类：置顶、今天、历史，同时转换为响应对象
-        List<ConversationResponse> pinnedList = new ArrayList<>();
-        List<ConversationResponse> todayList = new ArrayList<>();
-        List<ConversationResponse> historyList = new ArrayList<>();
-        
-        for (Conversation conv : allConversations) {
-            // 转换为响应对象
-            ConversationResponse response = new ConversationResponse();
-            BeanUtils.copyProperties(conv, response);
-            response.setCreatedAt(TimeUtils.toTimestamp(conv.getCreatedAt()));
-            response.setUpdatedAt(TimeUtils.toTimestamp(conv.getUpdatedAt()));
-            // 获取消息数量
-            Integer messageCount = messageMapper.countByConversationId(conv.getId());
-            response.setMessageCount(messageCount != null ? messageCount : 0);
-            
-            // 根据置顶状态和更新时间分类
-            if (Boolean.TRUE.equals(conv.getIsPinned())) {
-                // 置顶的会话
-                pinnedList.add(response);
-            } else if (conv.getUpdatedAt() != null && 
-                      !conv.getUpdatedAt().isBefore(todayStart) && 
-                      !conv.getUpdatedAt().isAfter(todayEnd)) {
-                // 今天的会话（非置顶）
-                todayList.add(response);
-            } else {
-                // 历史的会话（非置顶）
-                historyList.add(response);
-            }
+        if (size > 100) {
+            size = 100;
         }
-        
-        // 构建响应
+        String today = DateUtil.today();
+
+
+        // 1. 置顶的会话：全部，不分页
+        LambdaQueryWrapper<Conversation> pinnedWrapper = new LambdaQueryWrapper<>();
+        pinnedWrapper.eq(Conversation::getUserId, userId)
+                .eq(Conversation::getIsDeleted, false)
+                .eq(Conversation::getIsPinned, true)
+                .orderByDesc(Conversation::getUpdatedAt);
+        List<Conversation> pinnedRows = conversationMapper.selectList(pinnedWrapper);
+        List<ConversationResponse> pinnedList = toConversationResponseList(pinnedRows);
+
+        // 2. 今日的会话：非置顶且 updated_at 在 [今日 00:00:00, 明日 00:00:00)，全部，不分页
+        LambdaQueryWrapper<Conversation> todayWrapper = new LambdaQueryWrapper<>();
+        todayWrapper.eq(Conversation::getUserId, userId)
+                .eq(Conversation::getIsDeleted, false)
+                .eq(Conversation::getIsPinned, false)
+                .ge(Conversation::getUpdatedAt, today+" 00:00:00")
+                .lt(Conversation::getUpdatedAt, today+ " 23:59:59")
+                .orderByDesc(Conversation::getUpdatedAt);
+        List<Conversation> todayRows = conversationMapper.selectList(todayWrapper);
+        List<ConversationResponse> todayList = toConversationResponseList(todayRows);
+
+        // 3. 历史会话：非置顶且非今日（updated_at 在今天之前），分页
+        LambdaQueryWrapper<Conversation> historyCountWrapper = new LambdaQueryWrapper<>();
+        historyCountWrapper.eq(Conversation::getUserId, userId)
+                .eq(Conversation::getIsDeleted, false)
+                .eq(Conversation::getIsPinned, false)
+                .lt(Conversation::getUpdatedAt, today+" 00:00:00");
+        Long total = conversationMapper.selectCount(historyCountWrapper);
+
+        LambdaQueryWrapper<Conversation> historyWrapper = new LambdaQueryWrapper<>();
+        historyWrapper.eq(Conversation::getUserId, userId)
+                .eq(Conversation::getIsDeleted, false)
+                .eq(Conversation::getIsPinned, false)
+                .lt(Conversation::getUpdatedAt, today+" 00:00:00")
+                .orderByDesc(Conversation::getUpdatedAt);
+        int offset = (page - 1) * size;
+        historyWrapper.last("LIMIT " + size + " OFFSET " + offset);
+        List<Conversation> historyRows = conversationMapper.selectList(historyWrapper);
+        List<ConversationResponse> historyList = toConversationResponseList(historyRows);
+
+        int totalPages = total == 0 ? 0 : (int) ((total + size - 1) / size);
+
         ConversationListResponse listResponse = new ConversationListResponse();
         listResponse.setPinnedConversations(pinnedList);
         listResponse.setTodayConversations(todayList);
         listResponse.setHistoryConversations(historyList);
-        listResponse.setHasMore(hasMore);
-        
-        // 设置lastId为最后一条记录的ID
-        if (!allConversations.isEmpty()) {
-            listResponse.setLastId(allConversations.get(allConversations.size() - 1).getId().toString());
-        } else {
-            listResponse.setLastId(null);
-        }
-        
+        listResponse.setPage(page);
+        listResponse.setSize(size);
+        listResponse.setTotal(total);
+        listResponse.setTotalPages(totalPages);
+
         return listResponse;
+    }
+
+    private List<ConversationResponse> toConversationResponseList(List<Conversation> conversations) {
+        List<ConversationResponse> list = new ArrayList<>();
+        for (Conversation conv : conversations) {
+            ConversationResponse response = new ConversationResponse();
+            BeanUtils.copyProperties(conv, response);
+            response.setCreatedAt(TimeUtils.toTimestamp(conv.getCreatedAt()));
+            response.setUpdatedAt(TimeUtils.toTimestamp(conv.getUpdatedAt()));
+            Integer messageCount = messageMapper.countByConversationId(conv.getId());
+            response.setMessageCount(messageCount != null ? messageCount : 0);
+            list.add(response);
+        }
+        return list;
     }
     
     /**
@@ -281,7 +288,46 @@ public class ConversationService {
         
         return messageMapper.selectByConversationId(conversationId);
     }
-    
+
+    /**
+     * 对消息进行点赞、点踩或取消反馈。点踩时可填写 feedbackText，会写入库。
+     *
+     * @param userId    当前用户ID
+     * @param messageId 消息ID
+     * @param request   反馈类型及点踩时的反馈内容
+     */
+    @Transactional
+    public void setMessageFeedback(Long userId, Long messageId, MessageFeedbackRequest request) {
+        Message message = messageMapper.selectById(messageId);
+        if (message == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "消息不存在");
+        }
+        Conversation conversation = conversationMapper.selectById(message.getConversationId());
+        if (conversation == null || Boolean.TRUE.equals(conversation.getIsDeleted())) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "会话不存在");
+        }
+        if (!conversation.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权限操作该消息");
+        }
+        MessageFeedbackRequest.FeedbackType feedback = request.getFeedback();
+        LambdaUpdateWrapper<Message> wrapper = new LambdaUpdateWrapper<Message>()
+                .eq(Message::getId, messageId)
+                .set(Message::getUpdatedAt, LocalDateTime.now());
+        if (feedback == MessageFeedbackRequest.FeedbackType.NONE) {
+            wrapper.set(Message::getFeedback, null)
+                    .set(Message::getFeedbackText, null);
+        } else if (feedback == MessageFeedbackRequest.FeedbackType.DISLIKE) {
+            wrapper.set(Message::getFeedback, feedback.name());
+            String feedbackText = request.getFeedbackText();
+            wrapper.set(Message::getFeedbackText, feedbackText != null ? feedbackText.trim() : null);
+        } else {
+            wrapper.set(Message::getFeedback, feedback.name())
+                    .set(Message::getFeedbackText, null);
+        }
+        messageMapper.update(null, wrapper);
+        log.info("消息反馈: userId={}, messageId={}, feedback={}, feedbackText={}", userId, messageId, feedback, request.getFeedbackText());
+    }
+
     /**
      * 自动生成会话标题（简单实现，作为临时标题）
      */
@@ -290,10 +336,10 @@ public class ConversationService {
         if (question == null || question.isEmpty()) {
             return "新会话";
         }
-        if (question.length() <= 30) {
+        if (question.length() <= 20) {
             return question;
         }
-        return question.substring(0, 30) + "...";
+        return question.substring(0, 20) + "...";
     }
 
     /**

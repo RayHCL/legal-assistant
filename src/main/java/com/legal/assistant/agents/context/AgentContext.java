@@ -21,6 +21,11 @@ public class AgentContext {
      */
     private String lastReportId;
 
+    /**
+     * 是否启用深度思考（推理过程展示，如 DeepSeek R1 / Qwen 思考模式）
+     */
+    private Boolean deepThinking;
+
     public AgentContext(Long userId, Long conversationId) {
         this.userId = userId;
         this.conversationId = conversationId;

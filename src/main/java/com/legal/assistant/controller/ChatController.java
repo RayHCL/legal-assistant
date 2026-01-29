@@ -39,14 +39,9 @@ public class ChatController {
     public Flux<StreamChatResponse> chatCompletion(
             @Valid @RequestBody ChatCompletionRequest request,
             HttpServletRequest httpRequest) {
-
         Long userId = (Long) httpRequest.getAttribute("userId");
-        if (userId == null) {
-            userId = -1L;
-        }
         log.info("收到对话请求: userId={}, agentType={}, question={}",
                 userId, request.getAgentType(), request.getQuestion());
-
         return chatService.createChatStream(userId, request);
     }
 
@@ -58,9 +53,6 @@ public class ChatController {
             @RequestParam Long conversationId,
             HttpServletRequest httpRequest) {
         Long userId = (Long) httpRequest.getAttribute("userId");
-        if (userId == null) {
-            userId = -1L;
-        }
         log.info("收到停止请求: userId={}, conversationId={}", userId, conversationId);
         chatService.stopChat(userId, conversationId);
         return Result.success();
@@ -74,9 +66,6 @@ public class ChatController {
             @RequestParam Long conversationId,
             HttpServletRequest httpRequest) {
         Long userId = (Long) httpRequest.getAttribute("userId");
-        if (userId == null) {
-            userId = -1L;
-        }
         log.info("获取建议问题请求: userId={}, conversationId={}", userId, conversationId);
         SuggestedQuestionsResponse response = chatService.getSuggestedQuestions(userId, conversationId);
         return Result.success(response);

@@ -29,7 +29,18 @@ public class Message {
     private String parameters;  // JSON格式存储参数配置
     
     private String status;  // streaming/completed/error (针对answer的状态)
-    
+
+    /**
+     * 用户反馈：LIKE-点赞，DISLIKE-点踩，null-未反馈或已取消
+     */
+    private String feedback;
+
+    /**
+     * 点踩时的反馈内容（仅当 feedback=DISLIKE 时有值）
+     */
+    @TableField("feedback_text")
+    private String feedbackText;
+
     @TableLogic
     @TableField("is_deleted")
     private Boolean isDeleted;

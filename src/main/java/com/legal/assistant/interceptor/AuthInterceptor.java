@@ -34,18 +34,16 @@ public class AuthInterceptor implements HandlerInterceptor {
             return true;
         }
         
-        HandlerMethod handlerMethod = (HandlerMethod) handler;
-        
-        // 检查是否有@NoAuth注解
-        if (handlerMethod.hasMethodAnnotation(NoAuth.class) || 
-            handlerMethod.getBeanType().isAnnotationPresent(NoAuth.class)) {
-            return true;
-        }
-        
         // 获取Token
         String token = getTokenFromRequest(request);
         if (token == null || token.isEmpty()) {
-            throw new BusinessException(ErrorCode.TOKEN_MISSING.getCode(), ErrorCode.TOKEN_MISSING.getMessage());
+            // 检查是否有@NoAuth注解
+            HandlerMethod handlerMethod = (HandlerMethod) handler;
+            if (handlerMethod.hasMethodAnnotation(NoAuth.class) ||
+                    handlerMethod.getBeanType().isAnnotationPresent(NoAuth.class)) {
+                request.setAttribute("userId", -1L);
+                return true;
+            }
         }
         
         // 验证Token

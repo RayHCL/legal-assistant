@@ -1,7 +1,9 @@
 package com.legal.assistant.controller;
 
 import com.legal.assistant.common.Result;
-import com.legal.assistant.dto.request.ConversationRequest;
+import com.legal.assistant.dto.request.MessageFeedbackRequest;
+import com.legal.assistant.dto.request.PinConversationRequest;
+import com.legal.assistant.dto.request.RenameConversationRequest;
 import com.legal.assistant.dto.response.ConversationListResponse;
 import com.legal.assistant.dto.response.ConversationResponse;
 import com.legal.assistant.entity.Message;
@@ -25,50 +27,46 @@ public class ConversationController {
     
     @Autowired
     private ConversationService conversationService;
-    
 
-    
     @GetMapping("/list")
-    @Operation(summary = "获取会话列表", description = "获取当前用户的会话列表，分为置顶、今天、历史三个分类。支持游标分页。需要Token认证。")
+    @Operation(summary = "获取会话列表", description = "置顶和今天的会话全部返回、不分页；仅历史会话分页（page/size/total/totalPages 针对历史列表）。需要Token认证。")
     public Result<ConversationListResponse> getConversationList(
-            @Parameter(description = "每页数量", example = "20")
+            @Parameter(description = "历史列表页码（从 1 开始）", example = "1")
+            @RequestParam(defaultValue = "1") Integer page,
+            @Parameter(description = "历史列表每页数量", example = "20")
             @RequestParam(defaultValue = "20") Integer size,
-            @Parameter(description = "上一页最后一条记录的ID（用于分页）", example = "100")
-            @RequestParam(required = false) String lastId,
             HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        ConversationListResponse response = conversationService.getConversationList(userId, size, lastId);
+        ConversationListResponse response = conversationService.getConversationList(userId, page, size);
         return Result.success(response);
     }
     
 
     @PostMapping("/{conversationId}/rename")
-    @Operation(summary = "重命名会话", description = "修改会话的标题。需要Token认证。")
+    @Operation(summary = "重命名会话", description = "修改会话的标题。参数在 body 中。需要Token认证。")
     public Result<Void> renameConversation(
             @Parameter(description = "会话ID", required = true, example = "1")
             @PathVariable Long conversationId,
-            @Parameter(description = "新标题", required = true, example = "我的法律咨询")
-            @RequestParam String newTitle,
+            @RequestBody @Valid RenameConversationRequest body,
             HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        conversationService.renameConversation(userId, conversationId, newTitle);
+        conversationService.renameConversation(userId, conversationId, body.getNewTitle());
         return Result.success();
     }
-    
+
     @PostMapping("/{conversationId}/pin")
-    @Operation(summary = "置顶/取消置顶会话", description = "将会话置顶或取消置顶。置顶的会话会在列表中优先显示。需要Token认证。")
+    @Operation(summary = "置顶/取消置顶会话", description = "将会话置顶或取消置顶。参数在 body 中。需要Token认证。")
     public Result<Void> pinConversation(
             @Parameter(description = "会话ID", required = true, example = "1")
             @PathVariable Long conversationId,
-            @Parameter(description = "是否置顶", required = true, example = "true")
-            @RequestParam Boolean pinned,
+            @RequestBody @Valid PinConversationRequest body,
             HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        conversationService.pinConversation(userId, conversationId, pinned);
+        conversationService.pinConversation(userId, conversationId, body.getPinned());
         return Result.success();
     }
     
-    @GetMapping("/{conversationId}")
+    @PostMapping("/delete/{conversationId}")
     @Operation(summary = "删除会话", description = "删除指定的会话（软删除），会话数据会保留30天。删除会话的同时会删除关联的所有消息。需要Token认证。")
     public Result<Void> deleteConversation(
             @Parameter(description = "会话ID", required = true, example = "1")
@@ -80,7 +78,7 @@ public class ConversationController {
     }
     
     @GetMapping("/{conversationId}/messages")
-    @Operation(summary = "获取会话消息历史", description = "获取指定会话的所有消息历史记录，按创建时间升序排列。需要Token认证。")
+    @Operation(summary = "获取会话消息历史", description = "获取指定会话的所有消息历史记录，按创建时间升序排列。")
     public Result<List<Message>> getMessages(
             @Parameter(description = "会话ID", required = true, example = "1")
             @PathVariable Long conversationId,
@@ -89,4 +87,17 @@ public class ConversationController {
         List<Message> messages = conversationService.getMessages(userId, conversationId);
         return Result.success(messages);
     }
+
+    @PostMapping("/message/{messageId}/feedback")
+    @Operation(summary = "消息点赞/点踩/取消", description = "对指定消息进行点赞、点踩或取消反馈。需为该消息所属会话的拥有者。")
+        public Result<Void> setMessageFeedback(
+            @Parameter(description = "消息ID", required = true, example = "1")
+            @PathVariable Long messageId,
+            @RequestBody @Valid MessageFeedbackRequest body,
+            HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        conversationService.setMessageFeedback(userId, messageId, body);
+        return Result.success();
+    }
+
 }

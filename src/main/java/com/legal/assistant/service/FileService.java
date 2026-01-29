@@ -247,17 +247,13 @@ public class FileService {
      * @return 后端服务的下载URL
      */
     public String buildDownloadUrl(String minioPath) {
-        // 移除末尾的斜杠（如果有）
-        String baseUrl = serverBaseUrl.endsWith("/")
-                ? serverBaseUrl.substring(0, serverBaseUrl.length() - 1)
-                : serverBaseUrl;
         // 对路径进行URL编码
         try {
             String encodedPath = URLEncoder.encode(minioPath,StandardCharsets.UTF_8);
-            return baseUrl + "/api/file/download?path=" + encodedPath;
+            return "/api/file/download?path=" + encodedPath;
         } catch (Exception e) {
             log.error("构建下载URL失败: {}", minioPath, e);
-            return baseUrl + "/api/file/download?path=" + minioPath;
+            return "/api/file/download?path=" + minioPath;
         }
     }
 
@@ -321,5 +317,26 @@ public class FileService {
             log.error("从MinIO下载文件失败: minioPath={}", minioPath, e);
             throw new RuntimeException("下载文件失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 根据文件ID获取 MinIO 路径，用于预览。若传入 userId 则校验归属。
+     *
+     * @param fileId 文件ID（上传接口返回的 fileId）
+     * @param userId 当前用户ID，可为 null（不校验时传 null）
+     * @return MinIO 路径，不存在或无权限时返回 null
+     */
+    public String getMinioPathByFileId(Long fileId, Long userId) {
+        if (fileId == null) {
+            return null;
+        }
+        DocumentFile doc = documentFileMapper.selectById(fileId);
+        if (doc == null) {
+            return null;
+        }
+        if (userId != null && !userId.equals(doc.getUserId())) {
+            return null;
+        }
+        return doc.getMinioPath();
     }
 }

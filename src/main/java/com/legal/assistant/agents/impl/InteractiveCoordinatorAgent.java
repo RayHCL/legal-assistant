@@ -57,12 +57,13 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
     @Override
     public ReActAgent configure(ModelType modelType, Double temperature, AgentContext agentContext) {
         String modelName = modelType.getCode();
-
-        DashScopeChatModel model = DashScopeChatModel.builder()
-                .apiKey(apiKey)
-                .defaultOptions(GenerateOptions.builder().temperature(temperature).build())
-                .modelName(modelName)
-                .build();
+        boolean enableThinking = Boolean.TRUE.equals(agentContext != null ? agentContext.getDeepThinking() : null);
+        GenerateOptions options = enableThinking
+                ? GenerateOptions.builder().temperature(temperature).thinkingBudget(5000).build()
+                : GenerateOptions.builder().temperature(temperature).build();
+        DashScopeChatModel model = enableThinking
+                ? DashScopeChatModel.builder().apiKey(apiKey).defaultOptions(options).modelName(modelName).enableThinking(true).build()
+                : DashScopeChatModel.builder().apiKey(apiKey).defaultOptions(options).modelName(modelName).build();
 
         // 创建记忆
         Memory memory = createMemory(model);

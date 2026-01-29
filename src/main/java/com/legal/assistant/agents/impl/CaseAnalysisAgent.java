@@ -1,11 +1,16 @@
 package com.legal.assistant.agents.impl;
 
-import com.legal.assistant.enums.AgentType;
 import com.legal.assistant.agents.base.ReactLegalAgent;
+import com.legal.assistant.dto.response.StreamChatResponse;
+import com.legal.assistant.enums.AgentType;
+import io.agentscope.core.agent.Event;
+import io.agentscope.core.agent.EventType;
+import io.agentscope.core.agent.StreamOptions;
 import org.springframework.stereotype.Component;
 
 /**
  * 案件分析Agent
+ * 流式输出与风险评估一致：仅订阅 REASONING 和 TOOL_RESULT，排除 AGENT_RESULT，避免结束时重复输出完整内容。
  */
 @Component
 public class CaseAnalysisAgent extends ReactLegalAgent {
@@ -13,6 +18,27 @@ public class CaseAnalysisAgent extends ReactLegalAgent {
     @Override
     public AgentType getAgentType() {
         return AgentType.CASE_ANALYSIS;
+    }
+
+    /**
+     * 与风险评估一致：只订阅 REASONING 和 TOOL_RESULT，排除 AGENT_RESULT，避免流式结束后重复输出完整内容。
+     */
+    @Override
+    protected StreamOptions createStreamOptions() {
+        return StreamOptions.builder()
+                .eventTypes(EventType.REASONING, EventType.TOOL_RESULT)
+                .incremental(true)
+                .includeReasoningResult(false)
+                .includeActingChunk(true)
+                .build();
+    }
+
+    @Override
+    protected StreamChatResponse convertEventToResponse(Event event, Long messageId, Long conversationId) {
+        if (event != null && event.getType() == EventType.AGENT_RESULT) {
+            return null;
+        }
+        return super.convertEventToResponse(event, messageId, conversationId);
     }
 
     @Override
