@@ -13,11 +13,7 @@ import io.agentscope.core.agent.Event;
 import io.agentscope.core.agent.EventType;
 import io.agentscope.core.agent.StreamOptions;
 import io.agentscope.core.memory.Memory;
-import io.agentscope.core.message.Msg;
-import io.agentscope.core.message.MsgRole;
-import io.agentscope.core.message.ToolResultBlock;
-import io.agentscope.core.message.ContentBlock;
-import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.*;
 import io.agentscope.core.model.DashScopeChatModel;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.tool.ToolExecutionContext;
@@ -28,6 +24,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.List;
 
 /**
  * 交互协调器Agent - 负责信息收集和流程控制
@@ -167,10 +165,11 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
     }
 
     /**
-     * 将事件转换为响应（覆盖基类方法）
+     * 将事件转换为响应（优化版：一次遍历处理所有逻辑）
      * 处理两种情况：
-     * 1. 主Agent的普通文本输出 -> status: message
-     * 2. 子Agent的报告内容（从ToolResultBlock提取）-> status: artifact
+     * 1. 主Agent的思考输出 -> status: thinking
+     * 2. 主Agent的普通文本输出 -> status: message
+     * 3. 子Agent的报告内容（从ToolResultBlock提取）-> status: artifact
      */
     @Override
     protected StreamChatResponse convertEventToResponse(
@@ -179,57 +178,38 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
             Long conversationId) {
 
         Msg msg = event.getMessage();
-        if (msg == null || msg.getContent() == null) {
+        List<ContentBlock> contents;
+        if (msg == null || (contents = msg.getContent()) == null || contents.isEmpty()) {
             return null;
         }
 
-        // 额外保护：跳过 AGENT_RESULT 类型的事件（避免输出完整的最终结果）
-        EventType eventType = event.getType();
-        if (eventType == EventType.AGENT_RESULT) {
-            log.debug("跳过AGENT_RESULT事件（主Agent最终结果，避免重复输出）");
+        // 跳过 AGENT_RESULT 类型的事件（避免输出完整的最终结果）
+        if (event.getType() == EventType.AGENT_RESULT) {
             return null;
         }
 
-        log.debug("处理事件: type={}, contentBlocks={}", eventType, msg.getContent().size());
-
-        // 遍历消息内容
-        for (ContentBlock block : msg.getContent()) {
-            log.debug("内容块类型: {}", block.getClass().getSimpleName());
-            
-            // 1. 处理子Agent的报告内容（ToolResultBlock）
+        // 一次遍历处理所有内容块
+        for (ContentBlock block : contents) {
+            // 处理子Agent的报告内容（ToolResultBlock）- 优先级最高
             if (block instanceof ToolResultBlock) {
-                ToolResultBlock toolResult = (ToolResultBlock) block;
-                String reportContent = extractReportFromToolResult(toolResult);
+                String reportContent = extractReportFromToolResult((ToolResultBlock) block);
                 if (reportContent != null && !reportContent.isEmpty()) {
-                    log.debug("提取到报告内容片段: length={}", reportContent.length());
-                    return new StreamChatResponse(
-                            messageId,
-                            conversationId,
-                            reportContent,
-                            "artifact",  // 子Agent报告内容为 artifact 状态
-                            null,
-                            false,
-                            null
-                    );
+                    return StreamChatResponse.message(messageId, conversationId, reportContent, "artifact");
                 }
             }
-            
-            // 2. 处理主Agent的普通文本输出（TextBlock）
+            // 处理主Agent的普通文本输出（TextBlock）
             else if (block instanceof TextBlock) {
-                TextBlock textBlock = (TextBlock) block;
-                String text = textBlock.getText();
+                String text = ((TextBlock) block).getText();
                 if (text != null && !text.isEmpty()) {
-                    log.debug("主Agent输出: {}", text.length() > 50 ? text.substring(0, 50) + "..." : text);
-                    return new StreamChatResponse(
-                            messageId,
-                            conversationId,
-                            text,
-                            "message",  // 主Agent输出为 message 状态
-                            null,
-                            false,
-                            null
-                    );
+                    return StreamChatResponse.message(messageId, conversationId, text, "message");
                 }
+            }
+            else if (block instanceof ThinkingBlock){
+                String thinking = ((ThinkingBlock) block).getThinking();
+                if (thinking != null && !thinking.isEmpty()){
+                    return StreamChatResponse.message(messageId, conversationId, thinking, "thinking");
+                }
+
             }
         }
 
@@ -237,122 +217,94 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
     }
 
     /**
-     * 从 ToolResultBlock 中提取报告内容
+     * 从 ToolResultBlock 中提取报告内容（优化版）
      */
     private String extractReportFromToolResult(ToolResultBlock toolResult) {
-        if (toolResult == null) {
-            log.debug("ToolResultBlock为null");
-            return null;
-        }
-        
-        if (toolResult.getOutput() == null) {
-            log.debug("ToolResultBlock.getOutput()为null");
+        List<ContentBlock> output = toolResult.getOutput();
+        if (output == null || output.isEmpty()) {
             return null;
         }
 
-        // 提取 ToolResultBlock 中的文本内容
-        StringBuilder sb = new StringBuilder();
-        for (ContentBlock block : toolResult.getOutput()) {
-            log.debug("ToolResultBlock内部块类型: {}", block.getClass().getSimpleName());
+        // 提取文本内容
+        StringBuilder sb = null;
+        for (ContentBlock block : output) {
             if (block instanceof TextBlock) {
                 String text = ((TextBlock) block).getText();
-                log.debug("TextBlock内容(前100字符): {}", text != null && text.length() > 100 ? text.substring(0, 100) : text);
-                if (text != null) {
-                    sb.append(text);
+                if (text != null && !text.isEmpty()) {
+                    if (sb == null) {
+                        sb = new StringBuilder(text);
+                    } else {
+                        sb.append(text);
+                    }
                 }
             }
         }
 
-        String jsonContent = sb.toString();
-        if (jsonContent.isEmpty()) {
-            log.debug("ToolResultBlock中没有文本内容");
+        if (sb == null || sb.length() == 0) {
             return null;
         }
 
-        // 如果内容不是以 { 开头，说明不是JSON格式的事件，可能是直接的报告文本
-        // 这通常是子Agent的最终返回结果，应该跳过以避免重复输出
-        String trimmed = jsonContent.trim();
-        if (!trimmed.startsWith("{")) {
-            log.debug("ToolResultBlock内容不是JSON格式，跳过（可能是子Agent最终结果）: length={}", trimmed.length());
+        String content = sb.toString();
+        // 快速检查：非JSON格式直接跳过
+        char firstChar = content.charAt(0);
+        if (firstChar != '{' && (firstChar != ' ' || !content.trim().startsWith("{"))) {
             return null;
         }
 
-        log.debug("准备解析JSON内容(前200字符): {}", jsonContent.length() > 200 ? jsonContent.substring(0, 200) : jsonContent);
-
-        // 解析 JSON 提取实际的报告文本
-        return parseSubAgentEventJson(jsonContent);
+        // 解析JSON提取报告文本
+        return parseSubAgentEventJson(content.trim());
     }
 
     /**
-     * 解析子Agent事件的 JSON，提取报告文本内容
+     * 解析子Agent事件的JSON（优化版：减少不必要的日志和检查）
      * JSON 格式: {"type":"REASONING","message":{"content":[{"type":"text","text":"报告内容"}]},...}
      */
-    private String parseSubAgentEventJson(String jsonContent) {
-        if (jsonContent == null || jsonContent.isEmpty()) {
-            log.debug("JSON内容为空");
-            return null;
-        }
-
+    private String parseSubAgentEventJson(String json) {
         try {
-            JsonNode root = OBJECT_MAPPER.readTree(jsonContent);
-            
-            // 检查是否是子Agent的事件（包含 type 和 message 字段）
-            if (!root.has("type") || !root.has("message")) {
-                log.debug("JSON不包含type或message字段, 字段列表: {}", root.fieldNames());
-                return null;
-            }
+            JsonNode root = OBJECT_MAPPER.readTree(json);
 
-            String eventType = root.get("type").asText();
-            log.debug("事件类型: {}", eventType);
-            
-            // 只处理 REASONING 类型的事件（流式报告片段）
-            // 跳过 AGENT_RESULT 类型（包含完整报告，会导致重复）
-            if (!"REASONING".equals(eventType)) {
-                if ("AGENT_RESULT".equals(eventType)) {
-                    log.debug("跳过AGENT_RESULT事件（避免重复输出完整报告）");
-                } else {
-                    log.debug("跳过非REASONING类型事件: {}", eventType);
-                }
-                return null;
-            }
-
+            // 快速检查必需字段
+            JsonNode typeNode = root.get("type");
             JsonNode messageNode = root.get("message");
-            if (messageNode == null || !messageNode.has("content")) {
-                log.debug("message节点不包含content字段");
+            if (typeNode == null || messageNode == null) {
+                return null;
+            }
+
+            // 只处理 REASONING 类型（流式报告片段）
+            if (!"REASONING".equals(typeNode.asText())) {
                 return null;
             }
 
             JsonNode contentArray = messageNode.get("content");
             if (contentArray == null || !contentArray.isArray()) {
-                log.debug("content不是数组");
                 return null;
             }
 
-            StringBuilder textContent = new StringBuilder();
+            // 提取文本内容
+            StringBuilder textContent = null;
             for (JsonNode contentBlock : contentArray) {
-                if (contentBlock.has("type") && "text".equals(contentBlock.get("type").asText())) {
-                    if (contentBlock.has("text")) {
-                        String text = contentBlock.get("text").asText();
-                        log.debug("提取到文本: {}", text);
-                        textContent.append(text);
+                JsonNode blockType = contentBlock.get("type");
+                JsonNode textNode = contentBlock.get("text");
+                if (blockType != null && "text".equals(blockType.asText()) && textNode != null) {
+                    String text = textNode.asText();
+                    if (text != null && !text.isEmpty()) {
+                        if (textContent == null) {
+                            textContent = new StringBuilder(text);
+                        } else {
+                            textContent.append(text);
+                        }
                     }
                 }
             }
 
-            // 如果提取的文本太长（超过 200 字符），可能是完整报告而不是流式片段
-            // 流式片段通常只有几个字到几十个字，完整报告有几千字
-            // 跳过长文本以避免重复输出
-            if (textContent.length() > 200) {
-                log.debug("提取的文本过长（可能是完整报告），跳过以避免重复: length={}", textContent.length());
+            // 跳过过长的文本（可能是完整报告而非流式片段）
+            if (textContent == null || textContent.length() == 0 || textContent.length() > 200) {
                 return null;
             }
 
-            String result = textContent.length() > 0 ? textContent.toString() : null;
-            log.debug("最终提取结果: {}", result);
-            return result;
+            return textContent.toString();
         } catch (Exception e) {
-            log.warn("解析子Agent事件JSON失败: {}, 内容: {}", e.getMessage(), 
-                    jsonContent.length() > 200 ? jsonContent.substring(0, 200) : jsonContent);
+            log.warn("解析子Agent事件JSON失败: {}", e.getMessage());
             return null;
         }
     }
@@ -368,9 +320,7 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
             
             # 当前时间
             {current_time}
-            
             # 信息收集要求
-            
             ## 必需信息
             1. 委托方名称及法律地位（如：原告/被告/买方/卖方等）
             2. 相对方名称及法律地位
@@ -393,46 +343,17 @@ public class InteractiveCoordinatorAgent extends ReactLegalAgent {
             1. **输出启动提示**（必须原样输出）：
                "正在启动风险评估程序，正在进行专业分析，请您稍候..."
             
-            2. **立即调用 generate_risk_assessment_report 工具**：
+            2. **生成风险评估报告**：
                - 这是必须的步骤，不能跳过
-               - 调用示例：
-                 Action: generate_risk_assessment_report
-                 Action Input: {"caseInfo": "委托方：张三（原告）；对方：李四面馆（被告）；核心诉求：索赔1000元；基本事实：2024年X月X日在李四面馆就餐发现苍蝇，已取证；现有证据：照片、付款记录"}
                - 将收集到的所有案件信息作为参数传入
             
-            3. **等待工具执行完成**（工具会输出完整的风险评估报告）
+            3. **等待生成报告完成**（输出完整的风险评估报告）
             
             4. **输出完成提示**：
                "风险评估报告已生成完成，如需下载PDF版本，请告诉我。"
             
             ## 第四步：生成下载报告地址（用户请求时执行）
-            当用户表示需要下载报告时：
-            1. 首先调用 get_last_report_id 工具获取最近生成的报告ID
-            2. 使用获取到的报告ID调用 generate_download_link 工具生成下载链接
-            3. 将生成的下载地址返回给用户
-            
-            # 可用工具
-            
-            1. **generate_risk_assessment_report**（最重要的工具）
-               - 作用：生成专业的风险评估报告
-               - 使用时机：信息收集完成后，必须立即调用
-               - 参数格式：案件描述文本（包含委托方、对方、诉求、事实、证据）
-               - 重要：这是唯一能生成报告的方式，不能自己生成
-            
-            2. **getFileContent**
-               - 作用：查看用户提供的文件内容
-            
-            3. **get_last_report_id**
-               - 作用：获取当前会话中最近生成的报告ID
-               - 使用时机：用户请求下载报告时，先调用此工具获取报告ID
-            
-            4. **generate_download_link**
-               - 作用：生成报告下载链接
-               - 参数：报告ID（通过 get_last_report_id 获取）
-            
-            # 关键原则
-            - ✅ 信息完整后必须调用 generate_risk_assessment_report 工具
-            - ✅ 使用工具后等待工具输出完成
-            - ✅ 工具调用是必须的，不是可选项
+            当用户表示需要下载报告时： 生成PDF的下载链接
+           
             """;
 }

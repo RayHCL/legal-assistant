@@ -285,8 +285,10 @@ public class ConversationService {
         if (!conversation.getUserId().equals(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN.getCode(), "无权限访问该会话");
         }
-        
-        return messageMapper.selectByConversationId(conversationId);
+        // 使用 selectList + wrapper，使 MyBatis-Plus 使用实体 ResultMap（含 files 的 TypeHandler），files 能正确反序列化为对象数组
+        LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Message::getConversationId, conversationId).orderByAsc(Message::getCreatedAt);
+        return messageMapper.selectList(wrapper);
     }
 
     /**

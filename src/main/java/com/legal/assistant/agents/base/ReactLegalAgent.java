@@ -9,18 +9,13 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.Event;
 import io.agentscope.core.agent.EventType;
 import io.agentscope.core.agent.StreamOptions;
+import io.agentscope.core.message.*;
 import io.agentscope.core.model.DashScopeChatModel;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.memory.InMemoryMemory;
 import io.agentscope.core.memory.autocontext.AutoContextConfig;
 import io.agentscope.core.memory.autocontext.AutoContextMemory;
 import io.agentscope.core.model.GenerateOptions;
-import io.agentscope.core.message.ContentBlock;
-import io.agentscope.core.message.Msg;
-import io.agentscope.core.message.MsgRole;
-import io.agentscope.core.message.TextBlock;
-import io.agentscope.core.message.ToolResultBlock;
-import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.tool.ToolExecutionContext;
 import io.agentscope.core.tool.Toolkit;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -166,15 +161,9 @@ public abstract class ReactLegalAgent {
             boolean isError,
             String errorMessage) {
 
-        return new StreamChatResponse(
-                messageId,
-                conversationId,
-                isError ? errorMessage : "",
-                isError ? "error" : "completed",
-                generatedTitle,
-                true,
-                null
-        );
+        return isError
+                ? StreamChatResponse.error(messageId, conversationId, errorMessage)
+                : StreamChatResponse.completed(messageId, conversationId, generatedTitle);
     }
 
     /**
@@ -229,7 +218,7 @@ public abstract class ReactLegalAgent {
     }
 
     /**
-     * 将Event转换为StreamChatResponse
+     * 将Event转换为StreamChatResponse（优化版：一次遍历处理所有逻辑）
      */
     protected StreamChatResponse convertEventToResponse(
             Event event,
@@ -241,163 +230,58 @@ public abstract class ReactLegalAgent {
             return null;
         }
 
-        // 获取文本内容
-        String content = getTextContent(msg);
-        if (content == null || content.isEmpty()) {
-            // 检查是否有工具调用信息
-            StreamChatResponse.ToolCallInfo toolCallInfo = extractToolCallInfo(msg, event.getType());
-            if (toolCallInfo != null) {
-                return new StreamChatResponse(
-                        messageId,
-                        conversationId,
-                        "",
-                        toolCallInfo.getIsToolCall() ? "tool_call" : "tool_result",
-                        null,
-                        false,
-                        toolCallInfo
-                );
-            }
-            return null;
-        }
-
-        // 确定状态
-        String status = determineStreamStatus(event, content);
-
-        return new StreamChatResponse(
-                messageId,
-                conversationId,
-                content,
-                status,
-                null,
-                false,
-                null
-        );
-    }
-
-    /**
-     * 确定流式响应的状态
-     * 子类可以覆盖此方法来自定义状态判断逻辑
-     *
-     * @param event   事件
-     * @param content 内容
-     * @return 状态字符串
-     */
-    protected String determineStreamStatus(Event event, String content) {
-        EventType eventType = event.getType();
-
-        if (eventType == EventType.REASONING) {
-            // 检查是否是 thinking 内容（深度思考）
-            if (isThinkingContent(event)) {
-                return "thinking";
-            }
-            return "message";
-        } else if (eventType == EventType.TOOL_RESULT) {
-            return "tool_result";
-        }
-
-        // 检查消息内容是否包含工具调用
-        Msg msg = event.getMessage();
-        if (msg != null && msg.getContent() != null) {
-            for (ContentBlock block : msg.getContent()) {
-                if (block instanceof ToolUseBlock) {
-                    return "tool_call";
-                }
-            }
-        }
-
-        // 默认为普通消息
-        return "message";
-    }
-
-    /**
-     * 判断是否是 thinking 内容（深度思考）
-     */
-    protected boolean isThinkingContent(Event event) {
-        Msg msg = event.getMessage();
-        if (msg == null) {
-            return false;
-        }
-
-        // 检查消息内容块是否是 thinking 类型
-        List<ContentBlock> contents = msg.getContent();
-        if (contents != null) {
-            for (ContentBlock block : contents) {
-                // 检查是否是 ThinkingBlock 类型
-                if (block.getClass().getSimpleName().equals("ThinkingBlock")) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 用于子类覆盖的状态确定方法（兼容旧版本）
-     */
-    protected String determineStreamStatus(String chunkText, String fullText, int[] reportState) {
-        return "message";
-    }
-
-    /**
-     * 从消息中提取文本内容
-     */
-    protected String getTextContent(Msg msg) {
-        if (msg == null) {
-            return null;
-        }
-
         List<ContentBlock> contents = msg.getContent();
         if (contents == null || contents.isEmpty()) {
             return null;
         }
 
-        StringBuilder sb = new StringBuilder();
+        EventType eventType = event.getType();
+        StringBuilder textBuilder = null;
+        ToolUseBlock toolUseBlock = null;
+        ToolResultBlock toolResultBlock = null;
+
+        // 一次遍历，收集所有需要的信息
         for (ContentBlock block : contents) {
             if (block instanceof TextBlock) {
                 String text = ((TextBlock) block).getText();
-                if (text != null) {
-                    sb.append(text);
+                if (text != null && !text.isEmpty()) {
+                    if (textBuilder == null) {
+                        textBuilder = new StringBuilder(text);
+                    } else {
+                        textBuilder.append(text);
+                    }
                 }
+            } else if (block instanceof ThinkingBlock) {
+                ThinkingBlock thinkingBlock = (ThinkingBlock) block;
+                return StreamChatResponse.message(messageId, conversationId,
+                        thinkingBlock.getThinking(), "thinking");
+            } else if (block instanceof ToolUseBlock && toolUseBlock == null) {
+                toolUseBlock = (ToolUseBlock) block;
+            } else if (block instanceof ToolResultBlock && toolResultBlock == null) {
+                toolResultBlock = (ToolResultBlock) block;
             }
         }
-        return sb.length() > 0 ? sb.toString() : null;
-    }
 
-    /**
-     * 提取工具调用信息
-     */
-    protected StreamChatResponse.ToolCallInfo extractToolCallInfo(Msg msg, EventType eventType) {
-        if (msg == null) {
-            return null;
+        // 优先处理文本内容
+        if (textBuilder != null && textBuilder.length() > 0) {
+            return StreamChatResponse.message(messageId, conversationId, textBuilder.toString(), "message");
         }
 
-        List<ContentBlock> contents = msg.getContent();
-        if (contents == null || contents.isEmpty()) {
-            return null;
+        // 处理工具调用
+        if (toolUseBlock != null) {
+            return StreamChatResponse.toolCall(messageId, conversationId,
+                    StreamChatResponse.ToolCallInfo.ofCall(
+                            toolUseBlock.getName(),
+                            toolUseBlock.getInput() != null ? toolUseBlock.getInput().toString() : null));
         }
 
-        for (ContentBlock block : contents) {
-            if (block instanceof ToolUseBlock) {
-                ToolUseBlock toolUse = (ToolUseBlock) block;
-                return new StreamChatResponse.ToolCallInfo(
-                        toolUse.getName(),
-                        toolUse.getInput() != null ? toolUse.getInput().toString() : null,
-                        null,
-                        true,
-                        false
-                );
-            } else if (block instanceof ToolResultBlock) {
-                ToolResultBlock toolResult = (ToolResultBlock) block;
-                String resultText = extractToolResultText(toolResult);
-                return new StreamChatResponse.ToolCallInfo(
-                        toolResult.getId(),  // 使用 getId() 方法
-                        null,
-                        resultText,
-                        false,
-                        true
-                );
-            }
+        // 处理工具结果
+        if (toolResultBlock != null) {
+            String resultText = extractToolResultText(toolResultBlock);
+            return StreamChatResponse.toolCall(messageId, conversationId,
+                    StreamChatResponse.ToolCallInfo.ofResult(toolResultBlock.getId(), resultText));
         }
+
         return null;
     }
 
@@ -410,16 +294,20 @@ public abstract class ReactLegalAgent {
             return null;
         }
 
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = null;
         for (ContentBlock block : output) {
             if (block instanceof TextBlock) {
                 String text = ((TextBlock) block).getText();
-                if (text != null) {
-                    sb.append(text);
+                if (text != null && !text.isEmpty()) {
+                    if (sb == null) {
+                        sb = new StringBuilder(text);
+                    } else {
+                        sb.append(text);
+                    }
                 }
             }
         }
-        return sb.length() > 0 ? sb.toString() : null;
+        return sb != null ? sb.toString() : null;
     }
 
 }

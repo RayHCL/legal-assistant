@@ -18,6 +18,7 @@ import com.legal.assistant.exception.ErrorCode;
 import com.legal.assistant.mapper.ConversationMapper;
 import com.legal.assistant.mapper.MessageMapper;
 import com.legal.assistant.mapper.ReportMapper;
+import com.legal.assistant.service.FileService;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.memory.Memory;
 import io.agentscope.core.session.Session;
@@ -90,6 +91,9 @@ public class ChatService {
     @Autowired
     private ReportMapper reportMapper;
 
+    @Autowired
+    private FileService fileService;
+
     @Value("${ai.dashscope.api-key}")
     private String apiKey;
 
@@ -141,10 +145,11 @@ public class ChatService {
         boolean finalIsNewConversation = isNewConversation;
 
         try {
-            // 1. 创建消息记录（包含query和answer）
+            // 1. 创建消息记录（包含 query、answer、关联文件 JSON）
             Message message = new Message();
             message.setConversationId(conversationId);
             message.setQuery(request.getQuestion());
+            message.setFiles(fileService.buildFilesList(request.getFileIds() != null ? request.getFileIds() : Collections.emptyList()));
             message.setStatus("streaming");
             message.setCreatedAt(LocalDateTime.now());
             message.setUpdatedAt(LocalDateTime.now());
@@ -155,7 +160,7 @@ public class ChatService {
             // 添加可用文件列表提示
             if (!request.getFileIds().isEmpty()) {
                 fullPrompt.append("\n\n【可用文件】\n");
-                fullPrompt.append("用户提供了以下文件，如需查看文件内容，请使用 getFileContent 工具获取：\n");
+                fullPrompt.append("用户提供了以下文件：\n");
                 for (Long fileId : request.getFileIds()) {
                     fullPrompt.append("  - 文件ID: ").append(fileId).append("\n");
                 }
@@ -184,9 +189,10 @@ public class ChatService {
             // 5. 获取Agent实例
             ReactLegalAgent reactAgent = agentFactory.getAgentInstance(request.getAgentType());
 
-            // 6. 用于累积完整内容和报告内容
+            // 6. 用于累积完整内容、报告内容和 thinking
             StringBuilder contentBuilder = new StringBuilder();
             StringBuilder artifactContentBuilder = new StringBuilder();
+            StringBuilder thinkingContentBuilder = new StringBuilder();
             AtomicReference<String> reportIdRef = new AtomicReference<>(null);
             
             // 保存message引用以便在回调中使用
@@ -205,19 +211,21 @@ public class ChatService {
                         log.info("收到停止信号: conversationId={}", finalConversationId);
                     }))
                     .doOnNext(response -> {
-                        // 累积完整内容（不落库thinking）
+                        // thinking=模型深度思考，落库 message.thinking；reasoning=ReAct 推理步骤，仅流式展示不落库；message/artifact 进 answer
                         if (response != null && response.getContent() != null) {
                             String status = response.getStatus();
                             if ("thinking".equals(status)) {
-                                // thinking内容不累积
+                                thinkingContentBuilder.append(response.getContent());
                                 return;
-                            } else if ("artifact".equals(status)) {
-                                // 报告内容累积到artifactContentBuilder
+                            }
+                            if ("reasoning".equals(status)) {
+                                // ReAct 推理步骤：只推给前端展示，不进入 answer、不落库 thinking
+                                return;
+                            }
+                            if ("artifact".equals(status)) {
                                 artifactContentBuilder.append(response.getContent());
-                                // 同时也累积到contentBuilder，保持流式内容不变
                                 contentBuilder.append(response.getContent());
                             } else {
-                                // 普通消息累积到contentBuilder
                                 contentBuilder.append(response.getContent());
                             }
                         }
@@ -256,8 +264,9 @@ public class ChatService {
                             answerContent = contentBuilder.toString();
                         }
 
-                        // 更新消息answer和状态为完成
+                        // 更新消息 answer、thinking 和状态为完成
                         finalMessage.setAnswer(answerContent);
+                        finalMessage.setThinking(thinkingContentBuilder.length() > 0 ? thinkingContentBuilder.toString() : null);
                         finalMessage.setStatus("completed");
                         finalMessage.setUpdatedAt(LocalDateTime.now());
                         messageMapper.updateById(finalMessage);
@@ -270,8 +279,9 @@ public class ChatService {
                         saveAgentSession(finalSessionKey);
 
                         log.error("Agent流式推理失败: conversationId={}", finalConversationId, error);
-                        // 更新消息状态为错误
+                        // 更新消息状态为错误，保留已产生的 thinking
                         finalMessage.setStatus("error");
+                        finalMessage.setThinking(thinkingContentBuilder.length() > 0 ? thinkingContentBuilder.toString() : null);
                         finalMessage.setUpdatedAt(LocalDateTime.now());
                         messageMapper.updateById(finalMessage);
                     })
@@ -281,9 +291,10 @@ public class ChatService {
                         // 保存 Agent 会话记忆
                         saveAgentSession(finalSessionKey);
                         
-                        // 更新消息状态为已停止
+                        // 更新消息状态为已停止，保留已产生的 thinking
                         finalMessage.setStatus("stopped");
-                        finalMessage.setAnswer(contentBuilder.toString() + "\n\n[已停止生成]");
+                        finalMessage.setAnswer(contentBuilder + "\n\n[已停止生成]");
+                        finalMessage.setThinking(thinkingContentBuilder.length() > 0 ? thinkingContentBuilder.toString() : null);
                         finalMessage.setUpdatedAt(LocalDateTime.now());
                         messageMapper.updateById(finalMessage);
                         

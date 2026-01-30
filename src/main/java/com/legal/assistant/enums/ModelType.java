@@ -4,10 +4,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 
 @Getter
-@Schema(description = "模型类型枚举", example = "QWEN_MAX")
+@Schema(description = "模型类型枚举", example = "QWEN_PLUS")
 public enum ModelType {
-    @Schema(description = "Qwen Max 模型")
-    QWEN_MAX("qwen-max", "Qwen Max 模型", true),
+    @Schema(description = "Qwen Plus模型")
+    QWEN_PLUS("qwen-plus", "Qwen Plus模型", true),
 
     @Schema(description = "DeepSeek Chat 模型")
     DEEPSEEK_CHAT("deepseek-chat", "DeepSeek Chat 模型", false),

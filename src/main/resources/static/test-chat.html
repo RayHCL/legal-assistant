@@ -245,7 +245,23 @@
         }
 
         .stream-thinking::before {
-            content: '💭 思考中... ';
+            content: '💭 模型深度思考 ';
+            font-weight: 600;
+        }
+
+        /* 🔍 ReAct 推理步骤（无论是否开启深度思考都会有） */
+        .stream-reasoning {
+            background: #f5f5f5;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            padding: 6px 10px;
+            margin: 6px 0;
+            color: #595959;
+            font-size: 12px;
+        }
+
+        .stream-reasoning::before {
+            content: '🔍 ReAct 推理 ';
             font-weight: 600;
         }
 
@@ -299,6 +315,7 @@
         }
 
         .status-thinking { background: #ffe58f; color: #ad8b00; }
+        .status-reasoning { background: #f5f5f5; color: #595959; }
         .status-message { background: #e6f7ff; color: #1890ff; }
         .status-artifact { background: #e6f7ff; color: #1890ff; }
         .status-tool_result { background: #f6ffed; color: #52c41a; }
@@ -789,14 +806,17 @@
                                     input.disabled = false;
                                     document.getElementById('sendBtn').disabled = false;
                                     break;
-                                } else if (['thinking', 'message', 'artifact', 'tool_result'].includes(json.status)) {
+                                } else if (['thinking', 'reasoning', 'message', 'artifact', 'tool_result'].includes(json.status)) {
                                     if (json.content) {
                                         console.log('追加内容:', json.content, 'status:', json.status);
                                         receivedChunks++;
 
                                         if (json.status === 'thinking') {
-                                            // 💭 思考内容（独立块）
+                                            // 💭 模型深度思考（仅开启深度思考时有）
                                             appendEphemeralBlock('thinking', json.content);
+                                        } else if (json.status === 'reasoning') {
+                                            // 🔍 ReAct 推理步骤（无论是否开启深度思考都会有）
+                                            appendEphemeralBlock('reasoning', json.content);
                                         } else if (json.status === 'tool_result') {
                                             // 🔧 工具结果（独立块）
                                             appendEphemeralBlock('tool-result', json.content);

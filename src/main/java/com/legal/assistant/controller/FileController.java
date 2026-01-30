@@ -91,14 +91,14 @@ public class FileController {
     @Operation(summary = "预览文件", description = "根据MinIO路径或文件ID预览文件。浏览器内嵌展示（inline），支持 PDF、图片等。")
     @NoAuth
     public void previewFile(
-            @Parameter(description = "MinIO文件路径（与 fileId 二选一）", example = "risk-reports/xxx.pdf")
-            @RequestParam(value = "path", required = false) String minioPath,
+            @Parameter(description = "文件路径（与 fileId 二选一）", example = "risk-reports/xxx.pdf")
+            @RequestParam(value = "path", required = false) String path,
             @Parameter(description = "文件ID（上传接口返回的 fileId，与 path 二选一）", example = "1")
             @RequestParam(value = "fileId", required = false) Long fileId,
             HttpServletRequest request,
             HttpServletResponse response) {
         try {
-            String path = minioPath;
+
             if (path == null || path.isEmpty()) {
                 if (fileId == null) {
                     response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
@@ -123,7 +123,7 @@ public class FileController {
             response.getOutputStream().flush();
             log.info("文件预览成功: path={}", path);
         } catch (Exception e) {
-            log.error("文件预览失败: path={}, fileId={}", minioPath, fileId, e);
+            log.error("文件预览失败: path={}, fileId={}", path, fileId, e);
             try {
                 response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                 response.getWriter().write("文件预览失败: " + e.getMessage());

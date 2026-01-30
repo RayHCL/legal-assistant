@@ -1,6 +1,8 @@
 package com.legal.assistant.service;
 
 import com.legal.assistant.dto.response.FileResponse;
+import com.legal.assistant.dto.response.MessageFileItem;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.legal.assistant.entity.DocumentFile;
 import com.legal.assistant.enums.FileType;
 import com.legal.assistant.mapper.DocumentFileMapper;
@@ -21,6 +23,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author hcl
@@ -48,7 +52,7 @@ public class FileService {
     @Autowired
     private  MinioClient minioClient;
     @Autowired
-    private  DocumentFileMapper documentFileMapper;
+    private DocumentFileMapper documentFileMapper;
 
 
 
@@ -250,10 +254,10 @@ public class FileService {
         // 对路径进行URL编码
         try {
             String encodedPath = URLEncoder.encode(minioPath,StandardCharsets.UTF_8);
-            return "/api/file/download?path=" + encodedPath;
+            return  encodedPath;
         } catch (Exception e) {
             log.error("构建下载URL失败: {}", minioPath, e);
-            return "/api/file/download?path=" + minioPath;
+            return minioPath;
         }
     }
 
@@ -338,5 +342,33 @@ public class FileService {
             return null;
         }
         return doc.getMinioPath();
+    }
+
+    /**
+     * 根据文件 ID 列表查询文件对象，转为 List&lt;MessageFileItem&gt;（用于 message.files 入库）
+     * 入库时由 TypeHandler 自动序列化为 JSON；接口返回时 Message.files 即为对象数组，无需前端 JSON.parse
+     *
+     * @param fileIds 文件 ID 列表，可为 null 或空
+     * @return 文件项列表，无文件时返回 null
+     */
+    public List<MessageFileItem> buildFilesList(List<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            return null;
+        }
+        LambdaQueryWrapper<DocumentFile> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(DocumentFile::getId, fileIds);
+        List<DocumentFile> docs = documentFileMapper.selectList(wrapper);
+        if (docs == null || docs.isEmpty()) {
+            return null;
+        }
+        return docs.stream()
+                .map(d -> new MessageFileItem(
+                        d.getId(),
+                        d.getFileName(),
+                        d.getFileType(),
+                        d.getFileSize(),
+                        buildDownloadUrl(d.getMinioPath())
+                ))
+                .collect(Collectors.toList());
     }
 }

@@ -1,79 +1,95 @@
 package com.legal.assistant;
 
 import io.agentscope.core.ReActAgent;
+import io.agentscope.core.agent.Event;
 import io.agentscope.core.agent.EventType;
 import io.agentscope.core.agent.StreamOptions;
-import io.agentscope.core.message.Msg;
-import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.agui.event.AguiEvent;
+import io.agentscope.core.message.*;
+import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.DashScopeChatModel;
-import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.model.GenerateOptions;
+import reactor.core.publisher.Flux;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * @author hcl
- * @date 2026-01-27 09:50:39
- * @description
+ * 测试 Agent 流式输出，可看到思考过程（thinking）
  */
 public class TestAgent {
 
     public static void main(String[] args) {
-        // 创建模型
+        // 开启深度思考，便于看到思考过程
+        boolean enableThinking = true;
+        GenerateOptions options = enableThinking
+                ? GenerateOptions.builder().temperature(0.7).thinkingBudget(5000).build()
+                : GenerateOptions.builder().temperature(0.7).build();
         DashScopeChatModel model = DashScopeChatModel.builder()
                 .apiKey("sk-197a1ca0bca44229830a9a7ff2486347")
+                .defaultOptions(options)
                 .modelName("qwen-plus")
+                .stream(true)
+                .enableThinking(true)
                 .build();
-
-        // 创建子智能体的 Provider（工厂）
-        // 注意：必须使用 lambda 表达式，确保每次调用创建新实例
-        Toolkit toolkit = new Toolkit();
-        toolkit.registration()
-                .subAgent(() -> ReActAgent.builder()
-                        .name("Trans")
-                        .sysPrompt("你是一个16进制转化器，你能将用户的提问转化为16进制")
-                        .model(model)
-                        .build())
-                .apply();
-
-        // 创建主智能体，配置工具
         ReActAgent mainAgent = ReActAgent.builder()
                 .name("Coordinator")
-                .sysPrompt("你是一个协调员。当遇到问题时，先使用调用Trans工具去处理。然后返回处理结果")
+                .sysPrompt("你是一个法律方面的专家，你能回答提出的法律方面问题")
                 .model(model)
                 .maxIters(3)
-                .toolkit(toolkit)
                 .build();
 
         Msg inputMsg = Msg.builder()
                 .role(MsgRole.USER)
-                .textContent("生成4条刑法，然后转化成16进制")
+                .textContent("生成10个关于食品安全的案件信息，我要作为报告进行选择")
                 .build();
 
+
+
+        // 流式选项：订阅所有事件，包含推理/思考结果
         StreamOptions streamOptions = StreamOptions.builder()
                 .eventTypes(EventType.ALL)
                 .incremental(true)
-                .includeReasoningResult(true)
+                .includeReasoningResult(false)
+                .includeReasoningChunk(true)
                 .includeActingChunk(true)
                 .build();
 
-        // 执行流式推理并打印结果
-        mainAgent.stream(inputMsg, streamOptions)
-                .doOnNext(event -> {
-                    Msg msg = event.getMessage();
-                    if (msg != null) {
-                        String content = msg.getTextContent();
-                        if (content != null && !content.isEmpty()) {
-                            System.out.println("=== " + event.getType() + " ===");
-                            System.out.println(content);
+        System.out.println("========== 流式输出（含思考过程） ==========\n");
 
-                        }
-                    }
-                })
-                .doOnComplete(() -> {
-                    System.out.println("\n\n=== 流式输出完成 ===");
-                })
-                .doOnError(error -> {
-                    System.err.println("发生错误: " + error.getMessage());
-                    error.printStackTrace();
-                })
-                .blockLast(); // 阻塞等待流完成
+        Flux<Event> stream = mainAgent.stream(inputMsg, streamOptions);
+
+        stream
+                .doOnNext(event -> printEvent(event))
+                .doOnComplete(() -> System.out.println("\n========== 流式输出结束 =========="))
+                .doOnError(e -> System.err.println("流式错误: " + e.getMessage()))
+                .blockLast();
+    }
+
+    /**
+     * 根据事件类型和内容块打印：思考过程用 [思考] 前缀，普通回复用 [回复]
+     */
+    private static void printEvent(Event event) {
+        Msg msg = event.getMessage();
+        if (msg == null || msg.getContent() == null) {
+            return;
+        }
+
+        if (event.getType()== EventType.REASONING){
+            List<ContentBlock> contents = msg.getContent();
+            for (ContentBlock block : contents) {
+                if (block instanceof ThinkingBlock){
+                    ThinkingBlock thinkingBlock = (ThinkingBlock) block;
+                    System.out.println("[思考] " + thinkingBlock.getThinking());
+                }
+
+            }
+        }
+
+
+    }
+
+    private static boolean isThinkingBlock(ContentBlock block) {
+        return block != null && "ThinkingBlock".equals(block.getClass().getSimpleName());
     }
 }

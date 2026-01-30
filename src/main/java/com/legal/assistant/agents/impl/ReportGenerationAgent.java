@@ -8,12 +8,16 @@ import com.legal.assistant.enums.ModelType;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.Event;
 import io.agentscope.core.agent.StreamOptions;
+import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
+import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.model.DashScopeChatModel;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.tool.ToolExecutionContext;
 import io.agentscope.core.tool.Toolkit;
+
+import java.util.List;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -289,7 +293,7 @@ public class ReportGenerationAgent extends ReactLegalAgent {
     }
 
     /**
-     * 将事件转换为artifact状态的StreamChatResponse
+     * 将事件转换为artifact状态的StreamChatResponse（优化版）
      * 报告生成Agent的所有文本输出都使用artifact状态
      */
     private StreamChatResponse convertEventToArtifactResponse(
@@ -298,38 +302,31 @@ public class ReportGenerationAgent extends ReactLegalAgent {
             Long conversationId) {
 
         Msg msg = event.getMessage();
-        if (msg == null) {
+        List<ContentBlock> contents;
+        if (msg == null || (contents = msg.getContent()) == null || contents.isEmpty()) {
             return null;
         }
 
-        // 获取文本内容
-        String content = getTextContent(msg);
-        if (content == null || content.isEmpty()) {
+        // 一次遍历提取文本内容
+        StringBuilder textBuilder = null;
+        for (ContentBlock block : contents) {
+            if (block instanceof TextBlock) {
+                String text = ((TextBlock) block).getText();
+                if (text != null && !text.isEmpty()) {
+                    if (textBuilder == null) {
+                        textBuilder = new StringBuilder(text);
+                    } else {
+                        textBuilder.append(text);
+                    }
+                }
+            }
+        }
+
+        if (textBuilder == null || textBuilder.length() == 0) {
             return null;
         }
 
-        // 报告生成Agent的所有输出都是artifact
-        return new StreamChatResponse(
-                messageId,
-                conversationId,
-                content,
-                "artifact",  // 固定为artifact状态
-                null,
-                false,
-                null
-        );
-    }
-
-    /**
-     * 覆盖状态判断方法 - 所有输出都是artifact
-     */
-    @Override
-    protected String determineStreamStatus(Event event, String content) {
-        return "artifact";
-    }
-
-    @Override
-    protected String determineStreamStatus(String chunkText, String fullText, int[] reportState) {
-        return "artifact";
+        // 所有输出都是artifact状态
+        return StreamChatResponse.message(messageId, conversationId, textBuilder.toString(), "artifact");
     }
 }

@@ -238,7 +238,7 @@
         <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-spring-boot-starter</artifactId>
-            <version>1.0.7</version>
+            <version>1.0.8</version>
         </dependency>
 
         <!-- OkHttp for HTTP requests (阿里百炼API调用) -->
